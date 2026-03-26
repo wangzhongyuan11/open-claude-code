@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import traceback
+
 from openagent.domain.tools import ToolContext, ToolExecutionResult, ToolSpec
 from openagent.extensions.base import ExtensionContext, PermissionPolicy
 from openagent.extensions.defaults import AllowAllPolicy
@@ -36,4 +38,12 @@ class ToolRegistry:
         if not decision.allowed:
             return ToolExecutionResult(content=decision.reason or "permission denied", is_error=True)
         tool = self.get(name)
-        return tool.invoke(arguments, context)
+        try:
+            return tool.invoke(arguments, context)
+        except Exception as exc:
+            detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
+            return ToolExecutionResult(
+                content=f"tool '{name}' failed: {detail}",
+                is_error=True,
+                metadata={"tool": name},
+            )
