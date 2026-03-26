@@ -69,8 +69,11 @@ def main() -> None:
             for message in runtime.session.messages:
                 print(f"[{message.role}] {message.content}")
             continue
-        reply = runtime.run_turn(user_input)
-        print(reply)
+        try:
+            reply = runtime.run_turn(user_input)
+            print(reply)
+        except Exception as exc:
+            print(f"[error] {exc}")
 
 
 if __name__ == "__main__":

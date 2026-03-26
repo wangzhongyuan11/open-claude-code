@@ -19,14 +19,16 @@ from openagent.session.store import SessionStore
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.delegate import DelegateTool
 from openagent.tools.builtin.edit import EditFileTool
-from openagent.tools.builtin.files import ListFilesTool, ReadFileTool, WriteFileTool
+from openagent.tools.builtin.files import AppendFileTool, ListFilesTool, ReadFileTool, WriteFileTool
 from openagent.tools.registry import ToolRegistry
 
 
 DEFAULT_SYSTEM_PROMPT = """You are a Python coding agent working in a local repository.
 Use tools when needed.
 Prefer reading files before editing them.
-Keep changes precise and minimal."""
+Keep changes precise and minimal.
+When a user asks for exact file contents or exact command output, return the actual tool result rather than a summary.
+Avoid noisy listings of .git, .openagent, __pycache__, and test cache directories unless the user explicitly asks for them."""
 
 logger = get_logger(__name__)
 
@@ -96,6 +98,7 @@ class AgentRuntime:
         registry = ToolRegistry()
         registry.register(ReadFileTool())
         registry.register(WriteFileTool())
+        registry.register(AppendFileTool())
         registry.register(EditFileTool())
         registry.register(ListFilesTool())
         registry.register(BashTool(timeout_seconds=self.settings.bash_timeout_seconds))
@@ -106,6 +109,7 @@ class AgentRuntime:
         registry = ToolRegistry()
         registry.register(ReadFileTool())
         registry.register(WriteFileTool())
+        registry.register(AppendFileTool())
         registry.register(EditFileTool())
         registry.register(ListFilesTool())
         registry.register(BashTool(timeout_seconds=self.settings.bash_timeout_seconds))

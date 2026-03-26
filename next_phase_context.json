@@ -1,0 +1,64 @@
+{
+  "project": "openagent",
+  "current_stage": "stage1_complete_with_runtime_validation",
+  "architecture": {
+    "style": "domain-model + runtime core + provider adapters + tool registry + session persistence + event logging",
+    "core_entrypoints": [
+      "src/openagent/cli/main.py",
+      "src/openagent/agent/runtime.py",
+      "src/openagent/agent/loop.py"
+    ],
+    "critical_modules": {
+      "domain": "Message, ToolCall, AgentResponse, Session, ToolSpec, Event",
+      "providers": "AnthropicProvider and VolcengineProvider behind build_provider()",
+      "tools": "ToolRegistry with builtin read/write/append/edit/list/bash/delegate",
+      "session": "SessionManager + SessionStore persist message history to .openagent/sessions",
+      "events": "EventBus writes JSONL traces to .openagent/logs",
+      "subagent": "SubagentManager runs isolated loop and is exposed via delegate tool"
+    }
+  },
+  "verified_capabilities": [
+    "CLI/REPL startup via openagent.sh and console entrypoint",
+    "provider-backed plain-text conversation",
+    "tool-call protocol persisted in session history",
+    "read_file/write_file/append_file/edit_file",
+    "bash success and failing command handling",
+    "session resume with continued conversation",
+    "event log emission",
+    "Volcengine-backed live execution"
+  ],
+  "partial_capabilities": [
+    {
+      "name": "delegate/subagent",
+      "status": "partial",
+      "detail": "subagent execution succeeds, but parent agent may repeatedly re-read results during confirmation and trigger repetitive_tool_loop fallback"
+    }
+  ],
+  "recent_fixes": [
+    "filtered noisy runtime directories from list_files",
+    "strengthened system prompt for exact file/command output",
+    "added loop resilience fallback for repetitive tool loops and max-step instability",
+    "added CLI exception guard",
+    "implemented AppendFileTool to match runtime registry",
+    "added tests for builtin tools and loop resilience"
+  ],
+  "current_test_status": {
+    "command": "PYTHONPATH=src pytest -q",
+    "result": "22 passed"
+  },
+  "next_stage_focus": {
+    "name": "stage2_runtime_stabilization",
+    "goals": [
+      "eliminate repetitive confirmation loops after delegate or exact-output tasks",
+      "add stronger completion heuristics in AgentLoop",
+      "add more realistic CLI smoke tests",
+      "keep degraded runs resumable without crashing the REPL"
+    ],
+    "priority_files": [
+      "src/openagent/agent/loop.py",
+      "src/openagent/agent/runtime.py",
+      "src/openagent/tools/builtin/delegate.py",
+      "tests/test_runtime_tasks.py",
+      "tests/test_loop_resilience.py"
+    ]
+  }
