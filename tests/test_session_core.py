@@ -95,3 +95,17 @@ def test_todo_commands_are_persisted(tmp_path: Path):
     runtime.complete_todo(0)
 
     assert "[completed] (high) verify session" in render_todos(runtime.session)
+
+
+def test_session_manager_assigns_message_relationships(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+
+    runtime.run_turn("link messages")
+
+    user_message = next(message for message in runtime.session.messages if message.role == "user")
+    assistant_message = next(message for message in runtime.session.messages if message.role == "assistant")
+
+    assert user_message.session_id == runtime.session.id
+    assert assistant_message.session_id == runtime.session.id
+    assert assistant_message.parent_id == user_message.id
+    assert assistant_message.finish == "stop"

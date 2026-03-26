@@ -35,11 +35,24 @@ class SessionManager:
     def append_message(self, session: Session, message: Message, mark_running_state: bool = False) -> None:
         if mark_running_state and message.role == "user":
             mark_running(session, message.content)
+        self._normalize_message(session, message)
         session.messages.append(message)
         session.touch()
         self.store.save(session)
 
     def append_turn_messages(self, session: Session, messages: list[Message]) -> None:
+        current_user_id = self._last_message_id(session, "user")
+        current_assistant_id: str | None = None
+        for message in messages:
+            self._normalize_message(session, message)
+            if message.role == "assistant":
+                if message.parent_id is None:
+                    message.parent_id = current_user_id
+                current_assistant_id = message.id
+            elif message.role == "tool" and message.parent_id is None:
+                message.parent_id = current_assistant_id
+            elif message.role == "user":
+                current_user_id = message.id
         session.messages.extend(messages)
         mark_completed(session)
         self.store.save(session)
@@ -101,3 +114,17 @@ class SessionManager:
 
     def list_sessions(self) -> list[Session]:
         return self.store.list_sessions()
+
+    @staticmethod
+    def _normalize_message(session: Session, message: Message) -> None:
+        if message.session_id is None:
+            message.session_id = session.id
+        if message.agent is None and message.role in {"user", "assistant"}:
+            message.agent = "main"
+
+    @staticmethod
+    def _last_message_id(session: Session, role: str) -> str | None:
+        for message in reversed(session.messages):
+            if message.role == role:
+                return message.id
+        return None

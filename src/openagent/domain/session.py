@@ -40,11 +40,15 @@ class SessionTodo:
 class Session:
     id: str
     workspace: str
-    schema_version: int = 2
+    project_id: str | None = None
+    directory: str | None = None
+    title: str | None = None
+    schema_version: int = 3
     created_at: str = field(default_factory=utc_now_iso)
     updated_at: str = field(default_factory=utc_now_iso)
     messages: list[Message] = field(default_factory=list)
     metadata: dict[str, str] = field(default_factory=dict)
+    permission: dict[str, str] = field(default_factory=dict)
     summary: SessionSummary | None = None
     status: SessionStatus = field(default_factory=SessionStatus)
     todos: list[SessionTodo] = field(default_factory=list)

@@ -17,6 +17,7 @@ class SessionStore:
         session = Session(
             id=session_id or self._new_id(),
             workspace=str(workspace.resolve()),
+            directory=str(workspace.resolve()),
         )
         self.save(session)
         return session
@@ -57,9 +58,13 @@ class SessionStore:
             "id": session.id,
             "schema_version": session.schema_version,
             "workspace": session.workspace,
+            "project_id": session.project_id,
+            "directory": session.directory,
+            "title": session.title,
             "created_at": session.created_at,
             "updated_at": session.updated_at,
             "metadata": session.metadata,
+            "permission": session.permission,
             "summary": {
                 "text": session.summary.text,
                 "compacted_message_count": session.summary.compacted_message_count,
@@ -93,10 +98,14 @@ class SessionStore:
         return Session(
             id=payload["id"],
             workspace=payload["workspace"],
+            project_id=payload.get("project_id"),
+            directory=payload.get("directory", payload.get("workspace")),
+            title=payload.get("title"),
             schema_version=payload.get("schema_version", 1),
             created_at=payload["created_at"],
             updated_at=payload["updated_at"],
             metadata=payload.get("metadata", {}),
+            permission=payload.get("permission", {}),
             summary=SessionSummary(
                 text=payload["summary"]["text"],
                 compacted_message_count=payload["summary"]["compacted_message_count"],

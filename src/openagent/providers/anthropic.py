@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from openagent.domain.messages import AgentResponse, Message, ToolCall
+from openagent.domain.messages import AgentResponse, Message, ModelRef, ToolCall
 from openagent.domain.tools import ToolSpec
 from openagent.providers.base import BaseProvider
 
@@ -45,7 +45,14 @@ class AnthropicProvider(BaseProvider):
                         arguments=dict(block.input),
                     )
                 )
-        return AgentResponse(text="".join(text_parts), tool_calls=tool_calls, raw=response)
+        finish = _map_anthropic_stop_reason(getattr(response, "stop_reason", None), bool(tool_calls))
+        return AgentResponse(
+            text="".join(text_parts),
+            tool_calls=tool_calls,
+            finish=finish,
+            model=ModelRef(provider_id="anthropic", model_id=self._model),
+            raw=response,
+        )
 
     @staticmethod
     def _to_anthropic_tool(tool: ToolSpec) -> dict:
@@ -92,3 +99,13 @@ class AnthropicProvider(BaseProvider):
             "role": message.role,
             "content": message.content,
         }
+
+
+def _map_anthropic_stop_reason(value: str | None, has_tool_calls: bool) -> str:
+    if has_tool_calls or value == "tool_use":
+        return "tool-calls"
+    if value == "end_turn":
+        return "stop"
+    if value == "max_tokens":
+        return "length"
+    return "other"

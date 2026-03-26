@@ -5,7 +5,7 @@ import os
 from typing import Any
 from urllib import error, request
 
-from openagent.domain.messages import AgentResponse, Message, ToolCall
+from openagent.domain.messages import AgentResponse, Message, ModelRef, TokenUsage, ToolCall
 from openagent.domain.tools import ToolSpec
 from openagent.providers.base import BaseProvider
 
@@ -119,7 +119,8 @@ class VolcengineProvider(BaseProvider):
         choices = payload.get("choices", [])
         if not choices:
             raise RuntimeError(f"Volcengine API returned no choices: {payload}")
-        message = choices[0].get("message", {})
+        choice = choices[0]
+        message = choice.get("message", {})
         tool_calls = []
         for item in message.get("tool_calls", []) or []:
             function = item.get("function", {})
@@ -131,8 +132,30 @@ class VolcengineProvider(BaseProvider):
                     arguments=json.loads(arguments),
                 )
             )
+        usage = payload.get("usage", {})
+        finish_reason = choice.get("finish_reason")
+        finish = "tool-calls" if tool_calls else _map_openai_finish_reason(finish_reason)
         return AgentResponse(
             text=message.get("content") or "",
             tool_calls=tool_calls,
+            finish=finish,
+            model=ModelRef(provider_id="volcengine", model_id=payload.get("model", "unknown")),
+            tokens=TokenUsage(
+                input=usage.get("prompt_tokens", 0),
+                output=usage.get("completion_tokens", 0),
+                reasoning=usage.get("reasoning_tokens", 0),
+                cache_read=usage.get("prompt_cache_hit_tokens", 0),
+                cache_write=usage.get("prompt_cache_miss_tokens", 0),
+            ),
             raw=payload,
         )
+
+
+def _map_openai_finish_reason(value: str | None) -> str:
+    mapping = {
+        "stop": "stop",
+        "length": "length",
+        "content_filter": "content-filter",
+        "tool_calls": "tool-calls",
+    }
+    return mapping.get(value or "", "other")

@@ -50,6 +50,11 @@ class AgentLoop:
                 Message(
                     role="assistant",
                     content=response.text,
+                    model=response.model,
+                    tokens=response.tokens,
+                    cost=response.cost,
+                    finish=response.finish or ("tool-calls" if response.tool_calls else "stop"),
+                    error=response.error,
                     tool_calls=response.tool_calls,
                 )
             )
