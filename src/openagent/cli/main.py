@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 
 from openagent.agent.runtime import build_default_runtime, build_session_manager
 from openagent.config.env import load_dotenv
+from openagent.session.todo import render_todos
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -68,6 +70,34 @@ def main() -> None:
         if user_input == "/history":
             for message in runtime.session.messages:
                 print(f"[{message.role}] {message.content}")
+            continue
+        if user_input == "/status":
+            print(runtime.status_report())
+            continue
+        if user_input == "/compact":
+            print(runtime.compact_session())
+            continue
+        if user_input == "/revert":
+            print(runtime.revert_last_turn())
+            continue
+        if user_input == "/retry":
+            print(runtime.retry_last_turn())
+            continue
+        if user_input == "/todos":
+            print(render_todos(runtime.session))
+            continue
+        if user_input.startswith("/todo "):
+            parts = shlex.split(user_input)
+            if len(parts) >= 3 and parts[1] == "add":
+                print(runtime.add_todo(" ".join(parts[2:])))
+                continue
+            if len(parts) == 3 and parts[1] == "done":
+                print(runtime.complete_todo(int(parts[2]) - 1))
+                continue
+            if len(parts) == 2 and parts[1] == "clear":
+                print(runtime.clear_todos())
+                continue
+            print("Usage: /todo add <text> | /todo done <index> | /todo clear")
             continue
         try:
             reply = runtime.run_turn(user_input)

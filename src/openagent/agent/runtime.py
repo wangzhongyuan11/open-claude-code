@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+import time
 from typing import Callable
 
 from openagent.agent.loop import AgentLoop
@@ -68,23 +70,78 @@ class AgentRuntime:
         self.session_manager.append_message(
             self.session,
             Message(role="user", content=user_text),
+            mark_running_state=True,
         )
-        history = self.loop.run(
-            messages=self.session.messages,
-            system_prompt=self.system_prompt,
-        )
-        self.session_manager.replace_messages(self.session, history)
-        last_assistant = next(
-            (message.content for message in reversed(self.session.messages) if message.role == "assistant"),
-            "",
-        )
-        self._emit("loop.completed", {"session_id": self.session.id, "assistant_length": len(last_assistant)})
-        logger.info("Completed turn for session %s", self.session.id)
-        return last_assistant
+        prompt_context = self.session_manager.build_prompt(self.session, self.system_prompt)
+        try:
+            history = self.loop.run(
+                messages=prompt_context.messages,
+                system_prompt=prompt_context.system_prompt,
+            )
+            new_messages = history[len(prompt_context.messages):]
+            self.session_manager.append_turn_messages(self.session, new_messages)
+            last_assistant = next(
+                (message.content for message in reversed(self.session.messages) if message.role == "assistant"),
+                "",
+            )
+            self._emit("loop.completed", {"session_id": self.session.id, "assistant_length": len(last_assistant)})
+            logger.info("Completed turn for session %s", self.session.id)
+            return last_assistant
+        except Exception as exc:
+            self.session_manager.fail_turn(self.session, str(exc))
+            self._emit("loop.failed", {"session_id": self.session.id, "error": str(exc)})
+            raise
 
     @property
     def session_id(self) -> str:
         return self.session.id
+
+    def status_report(self) -> str:
+        payload = {
+            "session_id": self.session.id,
+            "state": self.session.status.state,
+            "retry_count": self.session.status.retry_count,
+            "last_error": self.session.status.last_error,
+            "recovery_hint": self.session.status.recovery_hint,
+            "summary_present": self.session.summary is not None,
+            "compacted_message_count": self.session.summary.compacted_message_count if self.session.summary else 0,
+            "message_count": len(self.session.messages),
+            "todo_count": len(self.session.todos),
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def compact_session(self) -> str:
+        changed = self.session_manager.compact(self.session)
+        if not changed:
+            return "Compaction not needed."
+        return (
+            f"Compacted session. Summary now covers "
+            f"{self.session.summary.compacted_message_count if self.session.summary else 0} messages."
+        )
+
+    def revert_last_turn(self) -> str:
+        changed = self.session_manager.revert_last_turn(self.session)
+        return "Reverted last turn." if changed else "No turn to revert."
+
+    def retry_last_turn(self) -> str:
+        last_user_message = self.session_manager.retry_last_turn(self.session)
+        if not last_user_message:
+            return "No previous user message to retry."
+        self.session_manager.revert_last_turn(self.session)
+        time.sleep(self.session_manager.retry_delay_ms(self.session) / 1000)
+        return self.run_turn(last_user_message)
+
+    def add_todo(self, content: str, priority: str = "medium") -> str:
+        self.session_manager.add_todo(self.session, content, priority)
+        return f"Added todo: {content}"
+
+    def complete_todo(self, index: int) -> str:
+        self.session_manager.complete_todo(self.session, index)
+        return f"Completed todo #{index + 1}"
+
+    def clear_todos(self) -> str:
+        self.session_manager.clear_todos(self.session)
+        return "Cleared todos."
 
     def _build_subagent_manager(self) -> SubagentManager:
         return SubagentManager(
@@ -153,4 +210,8 @@ def build_session_manager(
 ) -> SessionManager:
     settings = Settings.from_workspace(workspace)
     store = SessionStore(Path(session_root) if session_root else settings.session_root)
-    return SessionManager(store)
+    return SessionManager(
+        store,
+        max_messages_before_compact=settings.compact_max_messages,
+        prompt_recent_messages=settings.prompt_recent_messages,
+    )
