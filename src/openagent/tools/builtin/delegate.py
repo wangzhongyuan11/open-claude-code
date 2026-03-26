@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from openagent.agent.subagent import SubagentManager
+from openagent.agent.subagent import SubagentManager, format_subagent_report
 from openagent.domain.tools import ToolContext, ToolExecutionResult
 from openagent.tools.base import BaseTool
 
 
 class DelegateTool(BaseTool):
     name = "delegate"
-    description = "Run a focused subagent with an isolated context and return its summary."
+    description = (
+        "Run a focused subagent with an isolated context and return a structured completion report. "
+        "Treat the delegate result as authoritative; do not re-open verified files unless the user explicitly asks."
+    )
     input_schema = {
         "type": "object",
         "properties": {
@@ -22,6 +25,10 @@ class DelegateTool(BaseTool):
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         result = self.subagent_manager.run(arguments["prompt"])
         return ToolExecutionResult(
-            content=result.summary or "(subagent returned no summary)",
-            metadata={"message_count": len(result.history)},
+            content=format_subagent_report(result),
+            metadata={
+                "message_count": len(result.history),
+                "touched_paths": result.touched_paths,
+                "verified_paths": result.verified_paths,
+            },
         )

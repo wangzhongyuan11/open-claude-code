@@ -28,7 +28,8 @@ Use tools when needed.
 Prefer reading files before editing them.
 Keep changes precise and minimal.
 When a user asks for exact file contents or exact command output, return the actual tool result rather than a summary.
-Avoid noisy listings of .git, .openagent, __pycache__, and test cache directories unless the user explicitly asks for them."""
+Avoid noisy listings of .git, .openagent, __pycache__, and test cache directories unless the user explicitly asks for them.
+Treat delegate tool results as authoritative completion reports. If a delegate result already includes verified paths, do not re-read those files unless the user explicitly asks you to inspect the contents yourself."""
 
 logger = get_logger(__name__)
 

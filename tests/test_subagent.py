@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from openagent.agent.loop import AgentLoop
-from openagent.agent.subagent import SubagentManager
+from openagent.agent.subagent import SubagentManager, format_subagent_report
 from openagent.domain.messages import AgentResponse, Message, ToolCall
 from openagent.domain.tools import ToolContext
 from openagent.providers.base import BaseProvider
@@ -67,6 +67,22 @@ def test_subagent_manager_runs_isolated_loop(tmp_path: Path):
 
     assert result.summary == "subagent finished"
     assert (tmp_path / "child.txt").read_text(encoding="utf-8") == "from subagent"
+    assert result.touched_paths == ["child.txt"]
+
+
+def test_subagent_report_contains_verified_paths(tmp_path: Path):
+    manager = SubagentManager(
+        provider_factory=ChildProvider,
+        registry_factory=build_subagent_registry,
+        workspace=tmp_path,
+        system_prompt="subagent prompt",
+    )
+
+    result = manager.run("create child.txt")
+    report = format_subagent_report(result)
+
+    assert '"status": "completed"' in report
+    assert '"touched_paths": [' in report
 
 
 def test_delegate_tool_integrates_with_parent_agent_loop(tmp_path: Path):
@@ -88,4 +104,4 @@ def test_delegate_tool_integrates_with_parent_agent_loop(tmp_path: Path):
     history = loop.run([Message(role="user", content="delegate this")])
 
     assert history[-1].content == "parent finished"
-    assert any(message.role == "tool" and message.content == "subagent finished" for message in history)
+    assert any(message.role == "tool" and "<delegate_result>" in message.content for message in history)
