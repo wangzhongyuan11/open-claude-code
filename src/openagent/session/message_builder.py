@@ -18,13 +18,27 @@ class AssistantMessageBuilder:
             )
         )
 
+    def update_requested_tools(self, requested_tools: int) -> None:
+        for part in self.message.parts:
+            if part.type == "step-start" and isinstance(part.content, dict):
+                part.content["requested_tools"] = requested_tools
+                return
+
     def add_text(self, text: str) -> None:
         if not text:
+            return
+        if self.message.parts and self.message.parts[-1].type == "text" and isinstance(self.message.parts[-1].content, str):
+            self.message.parts[-1].content += text
+            self.message.content = self.message._derive_content_from_parts()
             return
         self.message.add_part(Part(type="text", content=text))
 
     def add_reasoning(self, text: str) -> None:
         if not text:
+            return
+        if self.message.parts and self.message.parts[-1].type == "reasoning" and isinstance(self.message.parts[-1].content, str):
+            self.message.parts[-1].content += text
+            self.message.content = self.message._derive_content_from_parts()
             return
         self.message.add_part(Part(type="reasoning", content=text))
 

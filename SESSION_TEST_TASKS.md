@@ -177,4 +177,27 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
   - `Turn N`
   - `User: ...`
   - `Assistant: finish=...`
-  - 若有工具调用，则看到 `ToolRequest` / `ToolResult`
+- 若有工具调用，则看到 `ToolRequest` / `ToolResult`
+
+## 10. Streaming Processor Skeleton
+
+输入：
+
+```text
+请只回复 stream-ready。
+```
+
+理论预期：
+
+- assistant 最终回复 `stream-ready`
+- session 日志 JSONL 中出现：
+  - `model.stream.event`
+  - `processor.part.appended`
+- 对于纯文本回复，至少应看到这些事件类型：
+  - `start`
+  - `text-delta`
+  - `finish`
+- 对应的 part 事件至少应看到：
+  - `step-start`
+  - `text`
+  - `step-finish`

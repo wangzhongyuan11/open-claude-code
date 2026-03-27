@@ -250,3 +250,43 @@ def test_write_file_tool_result_creates_file_mutation_part(tmp_path: Path):
     tool_message = next(message for message in runtime.session.messages if message.role == "tool" and message.name == "write_file")
     file_part = next(part for part in tool_message.parts if part.type == "file")
     assert file_part.state["mutation"] == "write_file"
+
+
+def test_streaming_processor_assembles_text_deltas_and_tool_calls(tmp_path: Path):
+    class StreamingProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            raise AssertionError("stream path should be used")
+
+        def stream_generate(self, messages, tools, system_prompt=None):
+            from openagent.domain.messages import AgentResponse, ToolCall
+
+            yield {"type": "start"}
+            yield {"type": "text-delta", "text": "先"}
+            yield {"type": "text-delta", "text": "读取"}
+            tool_call = ToolCall(id="call-1", name="read_file", arguments={"path": "README.md"})
+            yield {"type": "tool-call", "tool_call": tool_call}
+            yield {
+                "type": "finish",
+                "response": AgentResponse(
+                    text="先读取",
+                    tool_calls=[tool_call],
+                    finish="tool-calls",
+                ),
+            }
+
+    (tmp_path / "README.md").write_text("hello\nworld\n", encoding="utf-8")
+    runtime = build_runtime(tmp_path)
+    runtime.provider = StreamingProvider()
+    runtime.provider_factory = StreamingProvider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    runtime.run_turn("streaming readme")
+
+    assistant_message = next(message for message in runtime.session.messages if message.role == "assistant")
+    assert assistant_message.content == "先读取"
+    assert any(part.type == "tool" for part in assistant_message.parts)

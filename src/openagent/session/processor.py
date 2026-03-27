@@ -51,15 +51,11 @@ class SessionProcessor:
 
         for _ in range(max_steps):
             step_count += 1
-            response = self.llm.generate(
-                LLMRequest(
-                    messages=history,
-                    tools=self.tool_registry.specs(),
-                    system_prompt=system_prompt,
-                    estimated_tokens=estimated_tokens,
-                )
+            response, assistant_message = self._stream_assistant_message(
+                messages=history,
+                system_prompt=system_prompt,
+                estimated_tokens=estimated_tokens,
             )
-            assistant_message = self._build_assistant_message(response)
             history.append(assistant_message)
             if not response.requests_tools:
                 return ProcessorResult(
@@ -147,42 +143,71 @@ class SessionProcessor:
             tool_call_count=tool_call_count,
         )
 
-    def _build_assistant_message(self, response) -> Message:
-        finish = response.finish or ("tool-calls" if response.tool_calls else "stop")
+    def _stream_assistant_message(
+        self,
+        messages: list[Message],
+        system_prompt: str | None,
+        estimated_tokens: int,
+    ) -> tuple[object, Message]:
         builder = AssistantMessageBuilder()
-        builder.start_step(requested_tools=len(response.tool_calls))
+        builder.start_step(requested_tools=0)
         self._emit("processor.part.appended", {"role": "assistant", "part_type": "step-start"})
-        if response.text:
-            builder.add_text(response.text)
-            self._emit("processor.part.appended", {"role": "assistant", "part_type": "text"})
-        for tool_call in response.tool_calls:
-            builder.add_tool_request(
-                tool_call_id=tool_call.id,
-                name=tool_call.name,
-                arguments=tool_call.arguments,
+        text_buffer = ""
+        tool_calls = []
+        final_response = None
+        for event in self.llm.stream_generate(
+            LLMRequest(
+                messages=messages,
+                tools=self.tool_registry.specs(),
+                system_prompt=system_prompt,
+                estimated_tokens=estimated_tokens,
             )
-            self._emit("processor.part.appended", {"role": "assistant", "part_type": "tool", "tool_name": tool_call.name})
+        ):
+            event_type = event["type"]
+            if event_type == "text-delta":
+                delta = event["text"]
+                text_buffer += delta
+                builder.add_text(delta)
+                self._emit("processor.part.appended", {"role": "assistant", "part_type": "text"})
+                continue
+            if event_type == "tool-call":
+                tool_call = event["tool_call"]
+                tool_calls.append(tool_call)
+                builder.add_tool_request(
+                    tool_call_id=tool_call.id,
+                    name=tool_call.name,
+                    arguments=tool_call.arguments,
+                )
+                self._emit("processor.part.appended", {"role": "assistant", "part_type": "tool", "tool_name": tool_call.name})
+                continue
+            if event_type == "finish":
+                final_response = event["response"]
+                break
+        if final_response is None:
+            raise RuntimeError("stream finished without a final response")
+        builder.update_requested_tools(len(tool_calls))
+        finish = final_response.finish or ("tool-calls" if tool_calls else "stop")
         builder.finish_step(
             finish=finish,
             tokens={
-                "input": response.tokens.input,
-                "output": response.tokens.output,
-                "reasoning": response.tokens.reasoning,
-                "cache_read": response.tokens.cache_read,
-                "cache_write": response.tokens.cache_write,
+                "input": final_response.tokens.input,
+                "output": final_response.tokens.output,
+                "reasoning": final_response.tokens.reasoning,
+                "cache_read": final_response.tokens.cache_read,
+                "cache_write": final_response.tokens.cache_write,
             },
-            cost=response.cost,
+            cost=final_response.cost,
         )
         self._emit("processor.part.appended", {"role": "assistant", "part_type": "step-finish", "finish": finish})
-        return builder.build(
+        return final_response, builder.build(
             role="assistant",
-            content=response.text,
-            model=response.model,
-            tokens=response.tokens,
-            cost=response.cost,
+            content=text_buffer,
+            model=final_response.model,
+            tokens=final_response.tokens,
+            cost=final_response.cost,
             finish=finish,
-            error=response.error,
-            tool_calls=response.tool_calls,
+            error=final_response.error,
+            tool_calls=tool_calls,
         )
 
     def _build_tool_message(self, tool_name: str, tool_call_id: str, arguments: dict, content: str, is_error: bool) -> Message:

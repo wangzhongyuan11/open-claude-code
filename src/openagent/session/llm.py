@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Iterable
 
 from openagent.domain.events import Event
 from openagent.domain.messages import AgentResponse, Message
@@ -45,6 +46,36 @@ class SessionLLM:
             },
         )
         return response
+
+    def stream_generate(self, request: LLMRequest) -> Iterable[dict[str, Any]]:
+        self._emit(
+            "model.requested",
+            {
+                "message_count": len(request.messages),
+                "estimated_tokens": request.estimated_tokens,
+                "tool_count": len(request.tools),
+                "mode": "stream",
+            },
+        )
+        for event in self.provider.stream_generate(
+            messages=request.messages,
+            tools=request.tools,
+            system_prompt=request.system_prompt,
+        ):
+            event_type = event.get("type", "unknown")
+            self._emit("model.stream.event", {"type": event_type})
+            if event_type == "finish":
+                response = event["response"]
+                self._emit(
+                    "model.responded",
+                    {
+                        "text_length": len(response.text),
+                        "tool_call_count": len(response.tool_calls),
+                        "finish": response.finish,
+                        "mode": "stream",
+                    },
+                )
+            yield event
 
     def _emit(self, event_type: str, payload: dict) -> None:
         if self.event_bus is None:

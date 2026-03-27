@@ -8,6 +8,7 @@ A minimal Python coding agent runtime inspired by opencode-style architecture.
 - Tool registry / dispatch
 - Session persistence
 - Session processor, prompt builder, compaction, and summary
+- Basic streaming session processor
 - Subagent delegation
 - CLI with session commands
 - Settings, logging, and JSONL events
@@ -123,6 +124,13 @@ The session layer is now the runtime center rather than a plain message store.
 - `session/summary.py`: session summary generation
 - `session/system.py`: session-aware system prompt construction
 - `session/inspect.py`: inspect/replay views over persisted session state
+
+The processor now runs through a basic streaming pipeline:
+
+- `provider.stream_generate(...)`
+- `session/llm.py` emits stream events
+- `session/processor.py` incrementally appends message parts
+- final assistant/tool messages are persisted after stream completion
 
 The runtime prompt is assembled from:
 
