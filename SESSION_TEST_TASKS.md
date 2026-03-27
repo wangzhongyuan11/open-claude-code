@@ -1,0 +1,151 @@
+# Session Test Tasks
+
+以下任务用于真实验证 `openagent` 的 session 主干、message/part 协议、processor、prompt/context、compaction/summary。
+
+## 1. 最小文本往返
+
+输入：
+
+```text
+请只回复 session-smoke-ok。
+```
+
+理论预期：
+
+- assistant 只回复 `session-smoke-ok`
+- 本轮 assistant message 的 `finish` 为 `stop`
+- session.json 中这轮 user/assistant message 都带 `session_id`
+
+## 2. 文件读取 + tool-use 协议
+
+输入：
+
+```text
+请读取 README.md 的前 3 行并原样输出。
+```
+
+理论预期：
+
+- assistant 先触发 `read_file`
+- tool result 回填后 assistant 原样输出前 3 行
+- session.json 中：
+  - assistant tool-call message 含 `tool` part，`state.status=requested`
+  - tool message 含 `tool` part，`state.status=completed`
+  - 若是 `read_file`，tool message 额外带 `file` part
+
+## 3. 文件写入
+
+输入：
+
+```text
+请创建 session_demo.txt，内容是 hello-session。
+```
+
+理论预期：
+
+- assistant 触发 `write_file`
+- 文件真实落盘
+- 最终 assistant 回复确认写入成功
+- session.json 中保留 tool call / tool result / final assistant reply
+
+## 4. 多轮会话恢复
+
+输入顺序：
+
+```text
+第一轮：请只回复 one。
+第二轮：请只回复 two。
+```
+
+然后退出，使用：
+
+```bash
+./openagent.sh --session-id <session_id>
+```
+
+理论预期：
+
+- `/history` 可看到前两轮
+- 继续发送 `请只回复 resumed-ok。`
+- assistant 正常回复 `resumed-ok`
+
+## 5. Compaction / Summary
+
+建议环境变量：
+
+```bash
+OPENAGENT_COMPACT_MAX_MESSAGES=4
+OPENAGENT_PROMPT_RECENT_MESSAGES=4
+OPENAGENT_PROMPT_MAX_TOKENS=200
+```
+
+输入顺序：
+
+```text
+请只回复 alpha。
+请读取 README.md 的前 2 行并原样输出。
+请只回复 gamma。
+请只回复 delta。
+```
+
+理论预期：
+
+- session.json 中 `summary` 不为空
+- `metadata` 中出现：
+  - `prompt_token_estimate`
+  - `compacted_token_estimate`
+  - `prompt_window_message_count`
+  - `compaction_mode`
+- 从 session 构建 prompt 时，前两条 synthetic message 分别是：
+  - `agent=summary`
+  - `agent=context`
+
+## 6. Subagent
+
+输入：
+
+```text
+请把下面任务委托给子代理完成：创建 subagent_check.txt，内容是 delegated-ok。完成后直接告诉我是否完成。
+```
+
+理论预期：
+
+- 主代理调用 `delegate`
+- 子代理在独立上下文中执行
+- 最终文件真实存在
+- 主代理应基于 delegate 结果收尾，而不是无限重复确认
+
+## 7. 错误路径：bash 非零退出
+
+输入：
+
+```text
+请执行命令 bash -lc 'echo fail-msg >&2; exit 7'，并告诉我错误输出和退出码。
+```
+
+理论预期：
+
+- assistant 调用 `bash`
+- tool result 中带 stderr
+- 最终 assistant 回复包含：
+  - `fail-msg`
+  - `7`
+
+## 8. Processor / Part 验证点
+
+如果要直接检查 session.json，应重点看：
+
+- `message.id`
+- `message.session_id`
+- `message.parent_id`
+- `message.finish`
+- `message.model`
+- `message.tokens`
+- `message.parts`
+- assistant part 中是否有：
+  - `step-start`
+  - `tool`
+  - `step-finish`
+- tool message 中是否有：
+  - `tool`
+  - `file`（针对 `read_file`）

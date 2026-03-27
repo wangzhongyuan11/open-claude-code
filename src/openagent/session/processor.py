@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 
 from openagent.domain.events import Event
-from openagent.domain.messages import Message
+from openagent.domain.messages import Message, Part
 from openagent.domain.tools import ToolContext
 from openagent.events.bus import EventBus
 from openagent.providers.base import BaseProvider
@@ -53,18 +53,8 @@ class SessionProcessor:
                     estimated_tokens=estimated_tokens,
                 )
             )
-            history.append(
-                Message(
-                    role="assistant",
-                    content=response.text,
-                    model=response.model,
-                    tokens=response.tokens,
-                    cost=response.cost,
-                    finish=response.finish or ("tool-calls" if response.tool_calls else "stop"),
-                    error=response.error,
-                    tool_calls=response.tool_calls,
-                )
-            )
+            assistant_message = self._build_assistant_message(response)
+            history.append(assistant_message)
             if not response.requests_tools:
                 return ProcessorResult(history=history, finish_reason=response.finish or "stop")
 
@@ -86,14 +76,7 @@ class SessionProcessor:
                         "is_error": result.is_error,
                     },
                 )
-                history.append(
-                    Message(
-                        role="tool",
-                        content=result.content,
-                        tool_call_id=tool_call.id,
-                        name=tool_call.name,
-                    )
-                )
+                history.append(self._build_tool_message(tool_call.name, tool_call.id, tool_call.arguments, result.content, result.is_error))
                 last_tool_result = (tool_call.name, result.content)
                 call_key = self._call_fingerprint(tool_call.name, tool_call.arguments)
                 repeated_calls[call_key] = repeated_calls.get(call_key, 0) + 1
@@ -139,3 +122,98 @@ class SessionProcessor:
             message += f"\nLast tool: {tool_name}\nLast tool result:\n{tool_output}"
         history.append(Message(role="assistant", content=message, finish="other"))
         return ProcessorResult(history=history, finish_reason=reason, unstable=True)
+
+    @staticmethod
+    def _build_assistant_message(response) -> Message:
+        finish = response.finish or ("tool-calls" if response.tool_calls else "stop")
+        parts: list[Part] = [
+            Part(
+                type="step-start",
+                content={"phase": "llm", "requested_tools": len(response.tool_calls)},
+                state={"status": "started"},
+            )
+        ]
+        if response.text:
+            parts.append(Part(type="text", content=response.text))
+        for tool_call in response.tool_calls:
+            parts.append(
+                Part(
+                    type="tool",
+                    content={
+                        "id": tool_call.id,
+                        "name": tool_call.name,
+                        "arguments": tool_call.arguments,
+                    },
+                    state={"status": "requested"},
+                )
+            )
+        parts.append(
+            Part(
+                type="step-finish",
+                content={
+                    "finish": finish,
+                    "tokens": {
+                        "input": response.tokens.input,
+                        "output": response.tokens.output,
+                        "reasoning": response.tokens.reasoning,
+                        "cache_read": response.tokens.cache_read,
+                        "cache_write": response.tokens.cache_write,
+                    },
+                    "cost": response.cost,
+                },
+                state={"status": "completed"},
+            )
+        )
+        return Message(
+            role="assistant",
+            content=response.text,
+            model=response.model,
+            tokens=response.tokens,
+            cost=response.cost,
+            finish=finish,
+            error=response.error,
+            tool_calls=response.tool_calls,
+            parts=parts,
+        )
+
+    @staticmethod
+    def _build_tool_message(
+        tool_name: str,
+        tool_call_id: str,
+        arguments: dict,
+        content: str,
+        is_error: bool,
+    ) -> Message:
+        status = "error" if is_error else "completed"
+        parts: list[Part] = [
+            Part(
+                type="tool",
+                content={
+                    "tool_call_id": tool_call_id,
+                    "name": tool_name,
+                    "arguments": arguments,
+                    "output": content,
+                },
+                state={"status": status},
+            )
+        ]
+        path = arguments.get("path")
+        if path and tool_name == "read_file":
+            parts.append(
+                Part(
+                    type="file",
+                    content={
+                        "source": "file",
+                        "path": str(path),
+                        "content": content,
+                    },
+                    state={"status": status},
+                )
+            )
+        return Message(
+            role="tool",
+            content=content,
+            tool_call_id=tool_call_id,
+            name=tool_name,
+            parts=parts,
+        )

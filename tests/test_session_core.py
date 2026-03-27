@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from openagent.agent.loop import AgentLoop
 from openagent.agent.runtime import AgentRuntime
 from openagent.config.settings import Settings
 from openagent.domain.messages import AgentResponse, Message
@@ -125,3 +126,40 @@ def test_prompt_context_includes_summary_and_runtime_note(tmp_path: Path):
     assert any(message.agent == "summary" for message in prompt.messages)
     assert any(message.agent == "context" for message in prompt.messages)
     assert prompt.estimated_tokens > 0
+
+
+def test_processor_creates_step_and_tool_parts(tmp_path: Path):
+    class ToolProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                from openagent.domain.messages import ToolCall
+
+                return AgentResponse(
+                    text="先读取文件。",
+                    tool_calls=[ToolCall(id="call-1", name="read_file", arguments={"path": "README.md"})],
+                )
+            return AgentResponse(text="读取完成。")
+
+    (tmp_path / "README.md").write_text("hello\nworld\n", encoding="utf-8")
+    runtime = build_runtime(tmp_path)
+    runtime.provider = ToolProvider()
+    runtime.provider_factory = ToolProvider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    runtime.run_turn("读取 README.md")
+
+    assistant_messages = [m for m in runtime.session.messages if m.role == "assistant"]
+    tool_messages = [m for m in runtime.session.messages if m.role == "tool"]
+    assert any(part.type == "step-start" for part in assistant_messages[0].parts)
+    assert any(part.type == "step-finish" for part in assistant_messages[0].parts)
+    assert any(part.type == "tool" for part in assistant_messages[0].parts)
+    assert any(part.type == "file" for part in tool_messages[0].parts)

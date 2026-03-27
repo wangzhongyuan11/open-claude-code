@@ -95,22 +95,3 @@ class ListFilesTool(BaseTool):
 def _is_ignored(path: Path, workspace: Path) -> bool:
     relative_parts = path.relative_to(workspace).parts
     return any(part in IGNORED_TOP_LEVEL_NAMES for part in relative_parts)
-
-
-class AppendFileTool(BaseTool):
-    name = "append_file"
-    description = "Append UTF-8 text to the end of a file in the workspace."
-    input_schema = {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "content": {"type": "string"},
-        },
-        "required": ["path", "content"],
-    }
-
-    def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
-        path = resolve_workspace_path(context.workspace, arguments["path"])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(path.read_text(encoding="utf-8") + arguments["content"], encoding="utf-8")
-        return ToolExecutionResult(content=f"appended {len(arguments['content'])} bytes to {arguments['path']}")

@@ -7,6 +7,7 @@ A minimal Python coding agent runtime inspired by opencode-style architecture.
 - Agent loop
 - Tool registry / dispatch
 - Session persistence
+- Session processor, prompt builder, compaction, and summary
 - Subagent delegation
 - CLI with session commands
 - Settings, logging, and JSONL events
@@ -23,7 +24,7 @@ src/openagent/
   events/      event bus and logger
   extensions/  permission and future integration hooks
   providers/   anthropic / volcengine
-  session/     session store and manager
+  session/     session store, manager, processor, prompt, compaction, summary
   tools/       registry and builtin tools
 ```
 
@@ -103,3 +104,40 @@ The demo uses a fake provider and exercises a real runtime, session store, and f
 ```bash
 PYTHONPATH=src pytest -q
 ```
+
+## Session Runtime
+
+The session layer is now the runtime center rather than a plain message store.
+
+- `session/store.py`: persistence and schema migration
+- `session/manager.py`: session orchestration and prompt preparation
+- `session/processor.py`: message processing loop for LLM/tool interactions
+- `session/llm.py`: provider invocation wrapper with event emission
+- `session/prompt.py`: prompt/context assembly
+- `session/compaction.py`: prompt-window planning and historical compaction
+- `session/summary.py`: session summary generation
+- `session/system.py`: session-aware system prompt construction
+
+The runtime prompt is assembled from:
+
+- base system prompt
+- session identity / degraded recovery context
+- historical summary synthetic message
+- working-set context synthetic message
+- recent real messages
+
+## Manual Validation Tasks
+
+See [`SESSION_TEST_TASKS.md`](./SESSION_TEST_TASKS.md) for a concrete prompt-by-prompt validation checklist, including:
+
+- plain text roundtrip
+- tool-use protocol
+- session resume
+- compaction / summary
+- subagent
+- bash error path
+- processor / part persistence checks
+
+## Work Log
+
+Ongoing engineering changes are recorded in [`work_log.jsonl`](./work_log.jsonl).

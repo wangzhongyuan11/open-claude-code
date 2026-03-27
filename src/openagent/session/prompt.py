@@ -22,15 +22,15 @@ def build_prompt_context(
     plan: CompactionPlan,
 ) -> PromptContext:
     prompt_messages: list[Message] = []
-    summary = summary_message(session)
-    if summary:
-        prompt_messages.append(summary)
-    context_note = build_context_note(plan.recent_messages)
+    historical_summary = summary_message(session)
+    if historical_summary:
+        prompt_messages.append(historical_summary)
+    context_note = build_context_note(plan)
     if context_note:
         prompt_messages.append(context_note)
     prompt_messages.extend(plan.recent_messages)
     notes: list[str] = []
-    if summary:
+    if historical_summary:
         notes.append("summary-included")
     if context_note:
         notes.append("context-note-included")
@@ -42,9 +42,10 @@ def build_prompt_context(
     )
 
 
-def build_context_note(messages: list[Message]) -> Message | None:
+def build_context_note(plan: CompactionPlan) -> Message | None:
+    messages = plan.recent_messages
     tool_states: list[str] = []
-    recent_files: list[str] = []
+    recent_files: list[str] = list(plan.recent_files)
     recent_turns: list[str] = []
     for message in messages[-6:]:
         if message.role == "assistant" and message.finish:
@@ -65,6 +66,16 @@ def build_context_note(messages: list[Message]) -> Message | None:
     if not tool_states and not recent_files and not recent_turns:
         return None
     lines = ["[Runtime Context]"]
+    lines.append(
+        f"Window: {len(plan.recent_messages)} messages, ~{plan.estimated_tokens} prompt tokens."
+    )
+    if plan.overflow_by_count or plan.overflow_by_tokens:
+        causes: list[str] = []
+        if plan.overflow_by_count:
+            causes.append("message-count")
+        if plan.overflow_by_tokens:
+            causes.append("token-budget")
+        lines.append("Compaction trigger: " + ", ".join(causes))
     if recent_turns:
         lines.append("Recent turn states:")
         lines.extend(f"- {item}" for item in _dedupe(recent_turns)[-6:])
