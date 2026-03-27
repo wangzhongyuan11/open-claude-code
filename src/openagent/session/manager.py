@@ -4,7 +4,7 @@ from pathlib import Path
 
 from openagent.domain.messages import Message
 from openagent.domain.session import Session
-from openagent.session.compaction import maybe_compact
+from openagent.session.compaction import apply_compaction, maybe_compact, plan_compaction
 from openagent.session.prompt import PromptContext, build_prompt_context
 from openagent.session.retry import retry_delay
 from openagent.session.revert import revert_last_turn
@@ -19,10 +19,12 @@ class SessionManager:
         store: SessionStore,
         max_messages_before_compact: int = 20,
         prompt_recent_messages: int = 12,
+        prompt_max_tokens: int = 12_000,
     ) -> None:
         self.store = store
         self.max_messages_before_compact = max_messages_before_compact
         self.prompt_recent_messages = prompt_recent_messages
+        self.prompt_max_tokens = prompt_max_tokens
 
     def start(self, workspace: Path, session_id: str | None = None) -> Session:
         if session_id:
@@ -58,19 +60,22 @@ class SessionManager:
         self.store.save(session)
 
     def build_prompt(self, session: Session, system_prompt: str) -> PromptContext:
-        maybe_compact(session, self.max_messages_before_compact, keep_recent=self.prompt_recent_messages)
-        self.store.save(session)
-        return build_prompt_context(
+        plan = plan_compaction(
             session,
-            system_prompt,
-            recent_message_limit=self.prompt_recent_messages,
+            self.max_messages_before_compact,
+            keep_recent=self.prompt_recent_messages,
+            max_prompt_tokens=self.prompt_max_tokens,
         )
+        apply_compaction(session, plan)
+        self.store.save(session)
+        return build_prompt_context(session, system_prompt, plan)
 
     def compact(self, session: Session) -> bool:
         changed = maybe_compact(
             session,
             self.max_messages_before_compact,
             keep_recent=self.prompt_recent_messages,
+            max_prompt_tokens=self.prompt_max_tokens,
         )
         self.store.save(session)
         return changed

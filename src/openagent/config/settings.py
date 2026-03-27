@@ -17,6 +17,7 @@ class Settings:
     bash_timeout_seconds: int = 30
     compact_max_messages: int = 20
     prompt_recent_messages: int = 12
+    prompt_max_tokens: int = 12000
 
     @classmethod
     def from_workspace(cls, workspace: str | Path) -> "Settings":
@@ -34,6 +35,7 @@ class Settings:
         bash_timeout_seconds = int(os.getenv("OPENAGENT_BASH_TIMEOUT", "30"))
         compact_max_messages = int(os.getenv("OPENAGENT_COMPACT_MAX_MESSAGES", "20"))
         prompt_recent_messages = int(os.getenv("OPENAGENT_PROMPT_RECENT_MESSAGES", "12"))
+        prompt_max_tokens = int(os.getenv("OPENAGENT_PROMPT_MAX_TOKENS", "12000"))
         return cls(
             workspace=workspace_path,
             session_root=state_root / "sessions",
@@ -45,4 +47,5 @@ class Settings:
             bash_timeout_seconds=bash_timeout_seconds,
             compact_max_messages=compact_max_messages,
             prompt_recent_messages=prompt_recent_messages,
+            prompt_max_tokens=prompt_max_tokens,
         )

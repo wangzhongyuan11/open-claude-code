@@ -77,6 +77,7 @@ class AgentRuntime:
             history = self.loop.run(
                 messages=prompt_context.messages,
                 system_prompt=prompt_context.system_prompt,
+                estimated_tokens=prompt_context.estimated_tokens,
             )
             new_messages = history[len(prompt_context.messages):]
             self.session_manager.append_turn_messages(self.session, new_messages)
@@ -107,6 +108,8 @@ class AgentRuntime:
             "compacted_message_count": self.session.summary.compacted_message_count if self.session.summary else 0,
             "message_count": len(self.session.messages),
             "todo_count": len(self.session.todos),
+            "prompt_token_estimate": self.session.metadata.get("prompt_token_estimate"),
+            "compacted_token_estimate": self.session.metadata.get("compacted_token_estimate"),
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -214,4 +217,5 @@ def build_session_manager(
         store,
         max_messages_before_compact=settings.compact_max_messages,
         prompt_recent_messages=settings.prompt_recent_messages,
+        prompt_max_tokens=settings.prompt_max_tokens,
     )

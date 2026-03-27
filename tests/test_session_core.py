@@ -20,10 +20,12 @@ def build_runtime(tmp_path: Path, compact_max_messages: int = 4) -> AgentRuntime
     settings = Settings.from_workspace(tmp_path)
     settings.compact_max_messages = compact_max_messages
     settings.prompt_recent_messages = 4
+    settings.prompt_max_tokens = 200
     manager = SessionManager(
         SessionStore(settings.session_root),
         max_messages_before_compact=settings.compact_max_messages,
         prompt_recent_messages=settings.prompt_recent_messages,
+        prompt_max_tokens=settings.prompt_max_tokens,
     )
     session = manager.start(workspace=tmp_path)
     return AgentRuntime(
@@ -61,6 +63,7 @@ def test_compaction_creates_summary_and_keeps_recent_messages(tmp_path: Path):
     assert runtime.session.summary.compacted_message_count > 0
     status = runtime.status_report()
     assert '"summary_present": true' in status
+    assert '"prompt_token_estimate":' in status
 
 
 def test_revert_last_turn_removes_latest_user_turn(tmp_path: Path):
@@ -109,3 +112,16 @@ def test_session_manager_assigns_message_relationships(tmp_path: Path):
     assert assistant_message.session_id == runtime.session.id
     assert assistant_message.parent_id == user_message.id
     assert assistant_message.finish == "stop"
+
+
+def test_prompt_context_includes_summary_and_runtime_note(tmp_path: Path):
+    runtime = build_runtime(tmp_path, compact_max_messages=2)
+    runtime.run_turn("first turn")
+    runtime.run_turn("second turn")
+    runtime.run_turn("third turn")
+
+    prompt = runtime.session_manager.build_prompt(runtime.session, runtime.system_prompt)
+
+    assert any(message.agent == "summary" for message in prompt.messages)
+    assert any(message.agent == "context" for message in prompt.messages)
+    assert prompt.estimated_tokens > 0
