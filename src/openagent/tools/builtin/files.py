@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 from openagent.domain.tools import ToolContext, ToolExecutionResult
@@ -33,7 +34,15 @@ class ReadFileTool(BaseTool):
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         path = resolve_workspace_path(context.workspace, arguments["path"])
-        return ToolExecutionResult(content=path.read_text(encoding="utf-8"))
+        content = path.read_text(encoding="utf-8")
+        return ToolExecutionResult(
+            content=content,
+            metadata={
+                "path": arguments["path"],
+                "content": content,
+                "snapshot_after_ref": _snapshot_ref(arguments["path"], content),
+            },
+        )
 
 
 class WriteFileTool(BaseTool):
@@ -50,9 +59,22 @@ class WriteFileTool(BaseTool):
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         path = resolve_workspace_path(context.workspace, arguments["path"])
+        before_exists = path.exists()
+        before_content = path.read_text(encoding="utf-8") if before_exists else ""
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(arguments["content"], encoding="utf-8")
-        return ToolExecutionResult(content=f"wrote {len(arguments['content'])} bytes to {arguments['path']}")
+        after_content = arguments["content"]
+        path.write_text(after_content, encoding="utf-8")
+        return ToolExecutionResult(
+            content=f"wrote {len(arguments['content'])} bytes to {arguments['path']}",
+            metadata={
+                "path": arguments["path"],
+                "before_content": before_content,
+                "after_content": after_content,
+                "before_exists": before_exists,
+                "snapshot_before_ref": _snapshot_ref(arguments["path"], before_content) if before_exists else None,
+                "snapshot_after_ref": _snapshot_ref(arguments["path"], after_content),
+            },
+        )
 
 
 class AppendFileTool(BaseTool):
@@ -69,10 +91,23 @@ class AppendFileTool(BaseTool):
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         path = resolve_workspace_path(context.workspace, arguments["path"])
+        before_exists = path.exists()
+        before_content = path.read_text(encoding="utf-8") if before_exists else ""
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(arguments["content"])
-        return ToolExecutionResult(content=f"appended {len(arguments['content'])} bytes to {arguments['path']}")
+        after_content = path.read_text(encoding="utf-8")
+        return ToolExecutionResult(
+            content=f"appended {len(arguments['content'])} bytes to {arguments['path']}",
+            metadata={
+                "path": arguments["path"],
+                "before_content": before_content,
+                "after_content": after_content,
+                "before_exists": before_exists,
+                "snapshot_before_ref": _snapshot_ref(arguments["path"], before_content) if before_exists else None,
+                "snapshot_after_ref": _snapshot_ref(arguments["path"], after_content),
+            },
+        )
 
 
 class ListFilesTool(BaseTool):
@@ -95,3 +130,8 @@ class ListFilesTool(BaseTool):
 def _is_ignored(path: Path, workspace: Path) -> bool:
     relative_parts = path.relative_to(workspace).parts
     return any(part in IGNORED_TOP_LEVEL_NAMES for part in relative_parts)
+
+
+def _snapshot_ref(path: str, content: str) -> str:
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+    return f"snapshot:{path}:{digest}"

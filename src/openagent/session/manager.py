@@ -6,7 +6,7 @@ from openagent.domain.messages import Message
 from openagent.domain.session import Session
 from openagent.session.compaction import apply_compaction, maybe_compact, plan_compaction
 from openagent.session.prompt import PromptContext, build_prompt_context
-from openagent.session.retry import retry_delay
+from openagent.session.retry import build_retry_message, retry_delay
 from openagent.session.revert import revert_last_turn
 from openagent.session.status import increment_retry, mark_completed, mark_degraded, mark_running, recover_if_interrupted
 from openagent.session.store import SessionStore
@@ -68,11 +68,14 @@ class SessionManager:
             max_prompt_tokens=self.prompt_max_tokens,
         )
         apply_compaction(session, plan)
-        session.metadata["last_prompt_notes"] = "|".join(plan_to_prompt_notes(plan))
+        prompt_context = build_prompt_context(session, system_prompt, plan)
+        prompt_notes = plan_to_prompt_notes(plan) + prompt_context.notes
+        session.metadata["last_prompt_notes"] = "|".join(prompt_notes)
         session.metadata["last_prompt_message_count"] = str(len(plan.recent_messages))
         session.metadata["last_prompt_message_ids"] = ",".join(message.id for message in plan.recent_messages[-12:])
+        session.metadata["prompt_token_estimate"] = str(prompt_context.estimated_tokens)
         self.store.save(session)
-        return build_prompt_context(session, system_prompt, plan)
+        return prompt_context
 
     def compact(self, session: Session) -> bool:
         changed = maybe_compact(
@@ -102,6 +105,12 @@ class SessionManager:
         if not session.status.last_user_message:
             return None
         increment_retry(session)
+        session.messages.append(
+            build_retry_message(
+                attempt=session.status.retry_count,
+                last_user_message=session.status.last_user_message,
+            )
+        )
         self.store.save(session)
         return session.status.last_user_message
 

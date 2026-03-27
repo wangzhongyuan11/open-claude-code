@@ -222,3 +222,48 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
   - 一个或多个 `text-delta`
   - `finish`
 - 最终 assistant message 仍应是一个正常消息对象，而不是只存在于事件流中
+
+## 12. Session Helpers + Richer Parts
+
+命令顺序：
+
+```bash
+./openagent.sh --print-session
+./openagent.sh --session-id <session_id> --stream --prompt "请创建 session_endgame_v4.txt，内容是 line-1。"
+./openagent.sh --session-id <session_id> --prompt "请读取 session_endgame_v4.txt 并只回复其内容。"
+./openagent.sh --session-id <session_id> --status
+./openagent.sh --session-id <session_id> --inspect
+```
+
+理论预期：
+
+- 文件真实落盘，外部读取应得到 `line-1`
+- 第二个 prompt 应返回 `line-1`
+- `--status` 能看到：
+  - `state`
+  - `retry_count`
+  - `status_last_transition`
+  - 最近一次 turn 的 metadata
+- `--inspect` 的 tool message 中可看到 richer parts：
+  - `tool`
+  - `file`
+  - `patch`
+  - `snapshot`
+
+如果要验证 retry / revert / todo：
+
+```text
+/todo add finish-session-review
+/todos
+请只回复 retry-base。
+/retry
+请只回复 to-be-reverted。
+/revert
+/history
+```
+
+理论预期：
+
+- todo 会持久化
+- retry 会重跑最后一条用户消息，并在 session 中留下 `retry` part
+- revert 会撤销最后一轮，并留下 `snapshot` 类型的 session-op 记录

@@ -15,6 +15,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-id", default=None, help="Resume an existing session")
     parser.add_argument("--list-sessions", action="store_true", help="List local sessions and exit")
     parser.add_argument("--print-session", action="store_true", help="Print the current session id and exit")
+    parser.add_argument("--status", action="store_true", help="Print session status and exit")
     parser.add_argument("--inspect", action="store_true", help="Print a structured session inspection view and exit")
     parser.add_argument("--replay", action="store_true", help="Print a turn-by-turn session replay view and exit")
     parser.add_argument("--prompt", default=None, help="Run one prompt and exit")
@@ -68,6 +69,10 @@ def main() -> None:
 
     if args.print_session:
         _print_session_summary(runtime)
+        return
+
+    if args.status:
+        print(runtime.status_report())
         return
 
     if args.inspect:

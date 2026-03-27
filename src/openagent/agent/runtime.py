@@ -18,6 +18,7 @@ from openagent.providers.base import BaseProvider
 from openagent.providers.factory import build_provider
 from openagent.session.manager import SessionManager
 from openagent.session.inspect import format_session_inspect, format_session_replay
+from openagent.session.status import status_payload
 from openagent.session.store import SessionStore
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.delegate import DelegateTool
@@ -30,9 +31,19 @@ DEFAULT_SYSTEM_PROMPT = """You are a Python coding agent working in a local repo
 Use tools when needed.
 Prefer reading files before editing them.
 Keep changes precise and minimal.
+If the user asks you to read, create, edit, append, list, inspect, or execute something in the workspace, you must use the appropriate tool rather than claiming success from reasoning alone.
+Never claim a file was created, edited, appended, or read unless you actually obtained a tool result that proves it.
+Never claim a command was executed unless you actually obtained a bash tool result.
 When a user asks for exact file contents or exact command output, return the actual tool result rather than a summary.
 Avoid noisy listings of .git, .openagent, __pycache__, and test cache directories unless the user explicitly asks for them.
 Treat delegate tool results as authoritative completion reports. If a delegate result already includes verified paths, do not re-read those files unless the user explicitly asks you to inspect the contents yourself."""
+
+TOOL_ENFORCEMENT_SUFFIX = """
+Tool enforcement:
+- This user request requires at least one real tool call before you can answer.
+- If you do not obtain a tool result, you must not claim the task was completed.
+- If a tool is unavailable or insufficient, say that explicitly instead of pretending the action succeeded.
+"""
 
 logger = get_logger(__name__)
 
@@ -85,6 +96,20 @@ class AgentRuntime:
                 estimated_tokens=prompt_context.estimated_tokens,
                 stream_handler=stream_handler,
             )
+            if self._request_requires_tool(user_text) and result.tool_call_count == 0:
+                self._emit("runtime.tool_enforcement.retry", {"session_id": self.session.id})
+                result = self.loop.run_result(
+                    messages=prompt_context.messages,
+                    system_prompt=prompt_context.system_prompt + "\n" + TOOL_ENFORCEMENT_SUFFIX,
+                    estimated_tokens=prompt_context.estimated_tokens,
+                    stream_handler=stream_handler,
+                )
+                if result.tool_call_count == 0:
+                    result = self._replace_unverified_result(
+                        result,
+                        "The request appears to require tools, but no tool was used. "
+                        "I cannot verify that the requested workspace action actually happened.",
+                    )
             history = result.history
             new_messages = history[len(prompt_context.messages):]
             self.session_manager.append_turn_messages(self.session, new_messages)
@@ -115,10 +140,7 @@ class AgentRuntime:
         payload = {
             "session_id": self.session.id,
             "title": self.session.title,
-            "state": self.session.status.state,
-            "retry_count": self.session.status.retry_count,
-            "last_error": self.session.status.last_error,
-            "recovery_hint": self.session.status.recovery_hint,
+            **status_payload(self.session),
             "summary_present": self.session.summary is not None,
             "compacted_message_count": self.session.summary.compacted_message_count if self.session.summary else 0,
             "message_count": len(self.session.messages),
@@ -207,6 +229,46 @@ class AgentRuntime:
         if self.event_bus is None:
             return
         self.event_bus.emit(Event(type=event_type, payload=payload))
+
+    @staticmethod
+    def _request_requires_tool(user_text: str) -> bool:
+        lowered = user_text.lower()
+        keywords = [
+            "read ",
+            "write ",
+            "edit ",
+            "append ",
+            "list ",
+            "bash",
+            "command",
+            "file",
+            "directory",
+            "workspace",
+            "读取",
+            "创建",
+            "写入",
+            "修改",
+            "编辑",
+            "追加",
+            "列出",
+            "执行",
+            "文件",
+            "目录",
+            "工作区",
+        ]
+        return any(keyword in lowered for keyword in keywords)
+
+    @staticmethod
+    def _replace_unverified_result(result, message: str):
+        history = list(result.history)
+        if history and history[-1].role == "assistant":
+            history[-1].content = message
+            history[-1].finish = "other"
+        else:
+            history.append(Message(role="assistant", content=message, finish="other"))
+        result.history = history
+        result.finish_reason = "other"
+        return result
 
 
 def build_default_runtime(

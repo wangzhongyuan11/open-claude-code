@@ -83,6 +83,7 @@ openagent --workspace .
 openagent --workspace . --list-sessions
 openagent --workspace . --session-id <session_id>
 openagent --workspace . --print-session
+openagent --workspace . --session-id <session_id> --status
 openagent --workspace . --session-id <session_id> --inspect
 openagent --workspace . --session-id <session_id> --replay
 openagent --workspace . --prompt "创建一个 demo.txt"
@@ -92,6 +93,7 @@ openagent --workspace . --stream --prompt "请只回复 stream-ok。"
 Interactive commands:
 
 - `/session`
+- `/status`
 - `/history`
 - `/inspect`
 - `/replay`
@@ -167,6 +169,19 @@ Session metadata also tracks recent runtime state, including:
 - `compacted_token_estimate`
 - `compaction_mode`
 
+Persisted message parts now cover more operational and artifact cases:
+
+- `text`: normal assistant text
+- `reasoning`: internal reasoning notes when present
+- `tool`: tool request / tool result state
+- `file`: file content or file mutation record
+- `patch`: unified diff for file mutations
+- `snapshot`: lightweight content snapshot refs for rollback/debug
+- `step-start` / `step-finish`: per-step boundaries and usage
+- `compaction`: compaction event records
+- `subtask`: delegate/subagent results
+- `retry`: retry scheduling metadata
+
 ## Manual Validation Tasks
 
 See [`SESSION_TEST_TASKS.md`](./SESSION_TEST_TASKS.md) for a concrete prompt-by-prompt validation checklist, including:
@@ -179,6 +194,8 @@ See [`SESSION_TEST_TASKS.md`](./SESSION_TEST_TASKS.md) for a concrete prompt-by-
 - bash error path
 - processor / part persistence checks
 - native provider streaming and CLI live output
+- status / retry / revert / todo helpers
+- patch / snapshot / compaction / retry parts
 
 ## Work Log
 

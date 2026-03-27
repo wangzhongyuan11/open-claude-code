@@ -87,7 +87,16 @@ class SessionProcessor:
                         "is_error": result.is_error,
                     },
                 )
-                history.append(self._build_tool_message(tool_call.name, tool_call.id, tool_call.arguments, result.content, result.is_error))
+                history.append(
+                    self._build_tool_message(
+                        tool_call.name,
+                        tool_call.id,
+                        tool_call.arguments,
+                        result.content,
+                        result.is_error,
+                        result.metadata,
+                    )
+                )
                 last_tool_result = (tool_call.name, result.content)
                 call_key = self._call_fingerprint(tool_call.name, tool_call.arguments)
                 repeated_calls[call_key] = repeated_calls.get(call_key, 0) + 1
@@ -133,18 +142,35 @@ class SessionProcessor:
         tool_call_count: int,
     ) -> ProcessorResult:
         self._emit("loop.failed", {"reason": reason, **details})
+        recovered = self._can_recover_from_loop_failure(reason, last_tool_result)
+        message = self._loop_failure_message(reason, last_tool_result)
+        history.append(Message(role="assistant", content=message, finish="other"))
+        return ProcessorResult(
+            history=history,
+            finish_reason="stop" if recovered else reason,
+            unstable=not recovered,
+            step_count=step_count,
+            tool_call_count=tool_call_count,
+        )
+
+    @staticmethod
+    def _loop_failure_message(reason: str, last_tool_result: tuple[str, str] | None) -> str:
+        if last_tool_result is not None:
+            tool_name, tool_output = last_tool_result
+            if reason == "repetitive_tool_loop" and tool_name in {"read_file", "bash"}:
+                return tool_output
         message = f"Stopped because the tool loop became unstable ({reason})."
         if last_tool_result is not None:
             tool_name, tool_output = last_tool_result
             message += f"\nLast tool: {tool_name}\nLast tool result:\n{tool_output}"
-        history.append(Message(role="assistant", content=message, finish="other"))
-        return ProcessorResult(
-            history=history,
-            finish_reason=reason,
-            unstable=True,
-            step_count=step_count,
-            tool_call_count=tool_call_count,
-        )
+        return message
+
+    @staticmethod
+    def _can_recover_from_loop_failure(reason: str, last_tool_result: tuple[str, str] | None) -> bool:
+        if last_tool_result is None:
+            return False
+        tool_name, _ = last_tool_result
+        return reason == "repetitive_tool_loop" and tool_name in {"read_file", "bash"}
 
     def _stream_assistant_message(
         self,
@@ -220,7 +246,15 @@ class SessionProcessor:
             tool_calls=tool_calls,
         )
 
-    def _build_tool_message(self, tool_name: str, tool_call_id: str, arguments: dict, content: str, is_error: bool) -> Message:
+    def _build_tool_message(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        arguments: dict,
+        content: str,
+        is_error: bool,
+        metadata: dict,
+    ) -> Message:
         builder = ToolMessageBuilder(
             name=tool_name,
             tool_call_id=tool_call_id,
@@ -240,4 +274,19 @@ class SessionProcessor:
         elif tool_name == "delegate":
             builder.add_subtask_result()
             self._emit("processor.part.appended", {"role": "tool", "part_type": "subtask", "tool_name": tool_name})
+        path = metadata.get("path") or arguments.get("path")
+        before_content = metadata.get("before_content")
+        after_content = metadata.get("after_content")
+        if path and isinstance(before_content, str) and isinstance(after_content, str):
+            builder.add_patch_result(before_content, after_content, str(path))
+            self._emit("processor.part.appended", {"role": "tool", "part_type": "patch", "tool_name": tool_name})
+            builder.add_snapshot_refs(
+                metadata.get("snapshot_before_ref"),
+                metadata.get("snapshot_after_ref"),
+                str(path),
+            )
+            self._emit("processor.part.appended", {"role": "tool", "part_type": "snapshot", "tool_name": tool_name})
+        elif path and metadata.get("snapshot_after_ref"):
+            builder.add_snapshot_refs(None, metadata.get("snapshot_after_ref"), str(path))
+            self._emit("processor.part.appended", {"role": "tool", "part_type": "snapshot", "tool_name": tool_name})
         return builder.build()

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from dataclasses import replace
 
 from openagent.domain.messages import Message, Part
 from openagent.domain.session import Session
-from openagent.session.compaction import CompactionPlan, summary_message
+from openagent.session.compaction import CompactionPlan, estimate_message_tokens, summary_message
 from openagent.session.system import build_system_prompt
 
 
@@ -28,16 +29,19 @@ def build_prompt_context(
     context_note = build_context_note(plan)
     if context_note:
         prompt_messages.append(context_note)
-    prompt_messages.extend(plan.recent_messages)
+    trimmed_recent, trimmed_count = build_recent_prompt_window(plan.recent_messages)
+    prompt_messages.extend(trimmed_recent)
     notes: list[str] = []
     if historical_summary:
         notes.append("summary-included")
     if context_note:
         notes.append("context-note-included")
+    if trimmed_count:
+        notes.append(f"prompt-window-trimmed:{trimmed_count}")
     return PromptContext(
         system_prompt=build_system_prompt(session, base_system_prompt),
         messages=prompt_messages,
-        estimated_tokens=plan.estimated_tokens,
+        estimated_tokens=sum(estimate_message_tokens(message) for message in prompt_messages),
         notes=notes,
     )
 
@@ -47,6 +51,9 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
     tool_states: list[str] = []
     recent_files: list[str] = list(plan.recent_files)
     recent_turns: list[str] = []
+    recent_patches: list[str] = []
+    recent_snapshots: list[str] = []
+    retry_notes: list[str] = []
     for message in messages[-6:]:
         if message.role == "assistant" and message.finish:
             recent_turns.append(f"assistant finish={message.finish}")
@@ -63,7 +70,19 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
                     if status:
                         line += f" -> {status}"
                     tool_states.append(line)
-    if not tool_states and not recent_files and not recent_turns:
+            elif part.type == "patch" and isinstance(part.content, str):
+                recent_patches.append(_patch_summary(part.content))
+            elif part.type == "snapshot" and isinstance(part.content, dict):
+                ref = part.content.get("ref")
+                path = part.content.get("path")
+                if ref:
+                    label = str(ref)
+                    if path:
+                        label += f" ({path})"
+                    recent_snapshots.append(label)
+            elif part.type == "retry" and isinstance(part.content, dict):
+                retry_notes.append(f"attempt={part.content.get('attempt')} delay_ms={part.content.get('delay_ms')}")
+    if not tool_states and not recent_files and not recent_turns and not recent_patches and not recent_snapshots and not retry_notes:
         return None
     lines = ["[Runtime Context]"]
     lines.append(
@@ -85,6 +104,15 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
     if recent_files:
         lines.append("Recent files:")
         lines.extend(f"- {item}" for item in _dedupe(recent_files)[-6:])
+    if recent_patches:
+        lines.append("Recent patches:")
+        lines.extend(f"- {item}" for item in _dedupe(recent_patches)[-4:])
+    if recent_snapshots:
+        lines.append("Recent snapshots:")
+        lines.extend(f"- {item}" for item in _dedupe(recent_snapshots)[-4:])
+    if retry_notes:
+        lines.append("Retry notes:")
+        lines.extend(f"- {item}" for item in _dedupe(retry_notes)[-4:])
     text = "\n".join(lines)
     return Message(
         role="assistant",
@@ -106,3 +134,65 @@ def _dedupe(values: list[str]) -> list[str]:
         seen.add(value)
         result.append(value)
     return result
+
+
+def _patch_summary(diff_text: str) -> str:
+    added = 0
+    removed = 0
+    for line in diff_text.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            added += 1
+        elif line.startswith("-"):
+            removed += 1
+    return f"+{added}/-{removed}"
+
+
+def build_recent_prompt_window(messages: list[Message], max_chars_per_part: int = 600) -> tuple[list[Message], int]:
+    trimmed_messages: list[Message] = []
+    trimmed_count = 0
+    for message in messages:
+        trimmed_message, changed = _trim_message(message, max_chars_per_part=max_chars_per_part)
+        trimmed_messages.append(trimmed_message)
+        if changed:
+            trimmed_count += 1
+    return trimmed_messages, trimmed_count
+
+
+def _trim_message(message: Message, max_chars_per_part: int) -> tuple[Message, bool]:
+    changed = False
+    trimmed_parts: list[Part] = []
+    for part in message.parts:
+        trimmed_part = replace(part)
+        if part.type in {"text", "reasoning", "patch"} and isinstance(part.content, str):
+            new_content, was_trimmed = _trim_text(part.content, max_chars_per_part)
+            trimmed_part.content = new_content
+            changed = changed or was_trimmed
+        elif part.type == "file" and isinstance(part.content, dict):
+            trimmed_content = dict(part.content)
+            text = trimmed_content.get("content")
+            if isinstance(text, str):
+                new_content, was_trimmed = _trim_text(text, max_chars_per_part)
+                trimmed_content["content"] = new_content
+                changed = changed or was_trimmed
+            trimmed_part.content = trimmed_content
+        elif part.type == "tool" and isinstance(part.content, dict):
+            trimmed_content = dict(part.content)
+            output = trimmed_content.get("output")
+            if isinstance(output, str):
+                new_output, was_trimmed = _trim_text(output, max_chars_per_part)
+                trimmed_content["output"] = new_output
+                changed = changed or was_trimmed
+            trimmed_part.content = trimmed_content
+        trimmed_parts.append(trimmed_part)
+    trimmed_message = replace(message, parts=trimmed_parts, content="")
+    trimmed_message.content = trimmed_message._derive_content_from_parts()
+    return trimmed_message, changed
+
+
+def _trim_text(text: str, max_chars: int) -> tuple[str, bool]:
+    if len(text) <= max_chars:
+        return text, False
+    omitted = len(text) - max_chars
+    return text[:max_chars] + f"\n...[truncated {omitted} chars]", True

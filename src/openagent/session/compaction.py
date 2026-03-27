@@ -42,28 +42,29 @@ def plan_compaction(
     keep_recent: int = 8,
     max_prompt_tokens: int = 12_000,
 ) -> CompactionPlan:
-    if not session.messages:
+    eligible_messages = prompt_eligible_messages(session.messages)
+    if not eligible_messages:
         return CompactionPlan(False, [], [], 0, 0, False, False, [], [])
 
-    total_tokens = sum(estimate_message_tokens(message) for message in session.messages)
-    overflow_by_count = len(session.messages) > max_messages
+    total_tokens = sum(estimate_message_tokens(message) for message in eligible_messages)
+    overflow_by_count = len(eligible_messages) > max_messages
     overflow_by_tokens = total_tokens > max_prompt_tokens
     if not overflow_by_count and not overflow_by_tokens:
         return CompactionPlan(
             False,
             [],
-            list(session.messages),
+            list(eligible_messages),
             total_tokens,
             0,
             False,
             False,
-            _recent_tools(session.messages),
-            _recent_files(session.messages),
+            _recent_tools(eligible_messages),
+            _recent_files(eligible_messages),
         )
 
     recent: list[Message] = []
     recent_tokens = 0
-    for message in reversed(session.messages):
+    for message in reversed(eligible_messages):
         token_count = estimate_message_tokens(message)
         must_keep = len(recent) < keep_recent
         within_budget = recent_tokens + token_count <= max_prompt_tokens
@@ -76,8 +77,8 @@ def plan_compaction(
         break
     recent.reverse()
 
-    compacted_count = max(0, len(session.messages) - len(recent))
-    compacted_messages = session.messages[:compacted_count]
+    compacted_count = max(0, len(eligible_messages) - len(recent))
+    compacted_messages = eligible_messages[:compacted_count]
     compacted_tokens = total_tokens - recent_tokens
     return CompactionPlan(
         changed=bool(compacted_messages),
@@ -107,6 +108,7 @@ def apply_compaction(session: Session, plan: CompactionPlan) -> bool:
     session.metadata["compacted_token_estimate"] = str(plan.compacted_tokens)
     session.metadata["prompt_window_message_count"] = str(len(plan.recent_messages))
     session.metadata["compaction_mode"] = _compaction_mode(plan)
+    session.messages.append(build_compaction_message(session, plan))
     session.touch()
     return True
 
@@ -150,6 +152,37 @@ def summary_message(session: Session) -> Message | None:
             Part(type="text", content=f"[Session Summary]\n{session.summary.text}"),
         ],
     )
+
+
+def build_compaction_message(session: Session, plan: CompactionPlan) -> Message:
+    mode = _compaction_mode(plan)
+    content = (
+        f"[Compaction] summarized {len(plan.compacted_messages)} messages; "
+        f"kept {len(plan.recent_messages)} recent messages; mode={mode}."
+    )
+    return Message(
+        role="assistant",
+        agent="session-op",
+        content=content,
+        finish="stop",
+        parts=[
+            Part(
+                type="compaction",
+                content={
+                    "compacted_message_count": len(plan.compacted_messages),
+                    "recent_message_count": len(plan.recent_messages),
+                    "estimated_tokens": plan.estimated_tokens,
+                    "compacted_tokens": plan.compacted_tokens,
+                    "mode": mode,
+                },
+                state={"status": "applied"},
+            )
+        ],
+    )
+
+
+def prompt_eligible_messages(messages: list[Message]) -> list[Message]:
+    return [message for message in messages if message.agent != "session-op"]
 
 
 def _recent_tools(messages: list[Message]) -> list[str]:

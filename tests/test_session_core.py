@@ -5,6 +5,7 @@ from openagent.agent.runtime import AgentRuntime
 from openagent.config.settings import Settings
 from openagent.domain.messages import AgentResponse, Message
 from openagent.domain.session import SessionStatus
+from openagent.session.status import render_status
 from openagent.providers.base import BaseProvider
 from openagent.session.manager import SessionManager
 from openagent.session.store import SessionStore
@@ -76,7 +77,9 @@ def test_revert_last_turn_removes_latest_user_turn(tmp_path: Path):
     result = runtime.revert_last_turn()
 
     assert result == "Reverted last turn."
-    assert runtime.session.messages[-1].content == "echo:first"
+    assert runtime.session.messages[-2].content == "echo:first"
+    assert runtime.session.messages[-1].agent == "session-op"
+    assert any(part.type == "snapshot" for part in runtime.session.messages[-1].parts)
 
 
 def test_interrupted_session_recovers_as_degraded(tmp_path: Path):
@@ -100,6 +103,7 @@ def test_todo_commands_are_persisted(tmp_path: Path):
     runtime.complete_todo(0)
 
     assert "[completed] (high) verify session" in render_todos(runtime.session)
+    assert runtime.session.metadata["todo_pending_count"] == "0"
 
 
 def test_session_manager_assigns_message_relationships(tmp_path: Path):
@@ -128,6 +132,24 @@ def test_prompt_context_includes_summary_and_runtime_note(tmp_path: Path):
     assert any(message.agent == "summary" for message in prompt.messages)
     assert any(message.agent == "context" for message in prompt.messages)
     assert prompt.estimated_tokens > 0
+
+
+def test_prompt_window_trims_large_tool_outputs(tmp_path: Path):
+    runtime = build_runtime(tmp_path, compact_max_messages=2)
+    large_text = "x" * 5000
+    runtime.session_manager.append_message(runtime.session, Message(role="user", content="seed"))
+    runtime.session_manager.append_turn_messages(
+        runtime.session,
+        [
+            Message(role="assistant", content="", tool_calls=[]),
+            Message(role="tool", content=large_text, name="read_file", tool_call_id="call-1"),
+        ],
+    )
+
+    prompt = runtime.session_manager.build_prompt(runtime.session, runtime.system_prompt)
+
+    assert any("prompt-window-trimmed:" in note for note in prompt.notes)
+    assert prompt.estimated_tokens < 2000
 
 
 def test_processor_creates_step_and_tool_parts(tmp_path: Path):
@@ -250,6 +272,8 @@ def test_write_file_tool_result_creates_file_mutation_part(tmp_path: Path):
     tool_message = next(message for message in runtime.session.messages if message.role == "tool" and message.name == "write_file")
     file_part = next(part for part in tool_message.parts if part.type == "file")
     assert file_part.state["mutation"] == "write_file"
+    assert any(part.type == "patch" for part in tool_message.parts)
+    assert any(part.type == "snapshot" for part in tool_message.parts)
 
 
 def test_streaming_processor_assembles_text_deltas_and_tool_calls(tmp_path: Path):
@@ -327,3 +351,66 @@ def test_runtime_stream_handler_receives_text_deltas(tmp_path: Path):
 
     assert reply == "stream-ok"
     assert seen == ["stream-", "ok"]
+
+
+def test_compaction_appends_operational_message_and_prompt_ignores_it(tmp_path: Path):
+    runtime = build_runtime(tmp_path, compact_max_messages=2)
+    runtime.run_turn("first")
+    runtime.run_turn("second")
+    runtime.run_turn("third")
+
+    assert any(message.agent == "session-op" and any(part.type == "compaction" for part in message.parts) for message in runtime.session.messages)
+    prompt = runtime.session_manager.build_prompt(runtime.session, runtime.system_prompt)
+    assert all(message.agent != "session-op" for message in prompt.messages)
+
+
+def test_retry_appends_retry_part_and_updates_status(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+    runtime.run_turn("retry me")
+
+    retried = runtime.session_manager.retry_last_turn(runtime.session)
+
+    assert retried == "retry me"
+    retry_message = runtime.session.messages[-1]
+    assert retry_message.agent == "session-op"
+    assert any(part.type == "retry" for part in retry_message.parts)
+    assert runtime.session.status.state == "retry"
+    assert runtime.session.metadata["status_last_transition"] == "retry"
+
+
+def test_status_render_includes_transition_metadata(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+    runtime.run_turn("status please")
+
+    status_text = render_status(runtime.session)
+
+    assert "state=idle" in status_text
+    assert "status_last_transition=completed" in status_text
+
+
+def test_runtime_tool_enforcement_retries_and_prevents_unverified_success(tmp_path: Path):
+    class FakeCreateProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResponse(text="已创建 x.txt")
+            return AgentResponse(text="仍然没有使用工具")
+
+    runtime = build_runtime(tmp_path)
+    provider = FakeCreateProvider()
+    runtime.provider = provider
+    runtime.provider_factory = lambda: provider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    reply = runtime.run_turn("请创建 x.txt，内容是 1。")
+
+    assert "cannot verify" in reply
+    assert provider.calls == 2

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import difflib
 
 from openagent.domain.messages import Message, Part
 
@@ -124,6 +125,44 @@ class ToolMessageBuilder:
                 state=state,
             )
         )
+
+    def add_patch_result(self, before_content: str, after_content: str, path: str) -> None:
+        diff = "".join(
+            difflib.unified_diff(
+                before_content.splitlines(keepends=True),
+                after_content.splitlines(keepends=True),
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+            )
+        )
+        if not diff:
+            return
+        self.message.add_part(
+            Part(
+                type="patch",
+                content=diff,
+                state={"status": "completed"},
+            )
+        )
+
+    def add_snapshot_refs(self, before_ref: str | None, after_ref: str | None, path: str) -> None:
+        refs = []
+        if before_ref:
+            refs.append({"ref": before_ref, "kind": "before"})
+        if after_ref:
+            refs.append({"ref": after_ref, "kind": "after"})
+        for item in refs:
+            self.message.add_part(
+                Part(
+                    type="snapshot",
+                    content={
+                        "path": path,
+                        "ref": item["ref"],
+                        "kind": item["kind"],
+                    },
+                    state={"status": "recorded"},
+                )
+            )
 
     def add_subtask_result(self) -> None:
         self.message.add_part(

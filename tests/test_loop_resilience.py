@@ -48,5 +48,32 @@ def test_agent_loop_returns_fallback_on_repetitive_tool_loop(tmp_path: Path):
     history = loop.run([Message(role="user", content="loop")], max_steps=12)
 
     assert history[-1].role == "assistant"
-    assert "repetitive_tool_loop" in history[-1].content
-    assert "Last tool result:\nok" in history[-1].content
+    assert history[-1].content == "ok"
+
+
+def test_agent_loop_returns_last_read_result_on_repetitive_read_loop(tmp_path: Path):
+    class RepetitiveReadProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            return AgentResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="call-1",
+                        name="read_file",
+                        arguments={"path": "loop.txt"},
+                    )
+                ]
+            )
+
+    (tmp_path / "loop.txt").write_text("loop-content", encoding="utf-8")
+    registry = ToolRegistry()
+    registry.register(ReadFileTool())
+    loop = AgentLoop(
+        provider=RepetitiveReadProvider(),
+        tool_registry=registry,
+        tool_context=ToolContext(workspace=tmp_path),
+    )
+
+    history = loop.run([Message(role="user", content="read exact")], max_steps=12)
+
+    assert history[-1].role == "assistant"
+    assert history[-1].content == "loop-content"
