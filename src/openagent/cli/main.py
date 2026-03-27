@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import shlex
+from typing import Any
 
 from openagent.agent.runtime import build_default_runtime, build_session_manager
 from openagent.config.env import load_dotenv
@@ -17,6 +18,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--inspect", action="store_true", help="Print a structured session inspection view and exit")
     parser.add_argument("--replay", action="store_true", help="Print a turn-by-turn session replay view and exit")
     parser.add_argument("--prompt", default=None, help="Run one prompt and exit")
+    parser.add_argument("--stream", action="store_true", help="Render assistant text deltas while the model is responding")
     return parser
 
 
@@ -24,9 +26,28 @@ def _print_session_summary(runtime) -> None:
     print(f"session: {runtime.session_id}")
 
 
-def _run_once(runtime, prompt: str) -> None:
-    reply = runtime.run_turn(prompt)
-    print(reply)
+def _build_stream_handler():
+    state = {"printed": False}
+
+    def handle(event: dict[str, Any]) -> None:
+        if event["type"] == "text-delta":
+            print(event["text"], end="", flush=True)
+            state["printed"] = True
+
+    return handle, state
+
+
+def _run_once(runtime, prompt: str, stream: bool = False) -> None:
+    if not stream:
+        reply = runtime.run_turn(prompt)
+        print(reply)
+        return
+    handler, state = _build_stream_handler()
+    reply = runtime.run_turn(prompt, stream_handler=handler)
+    if state["printed"]:
+        print()
+    elif reply:
+        print(reply)
 
 
 def main() -> None:
@@ -59,7 +80,7 @@ def main() -> None:
 
     if args.prompt is not None:
         _print_session_summary(runtime)
-        _run_once(runtime, args.prompt)
+        _run_once(runtime, args.prompt, stream=args.stream)
         return
 
     _print_session_summary(runtime)
@@ -116,8 +137,16 @@ def main() -> None:
             print("Usage: /todo add <text> | /todo done <index> | /todo clear")
             continue
         try:
-            reply = runtime.run_turn(user_input)
-            print(reply)
+            if args.stream:
+                handler, state = _build_stream_handler()
+                reply = runtime.run_turn(user_input, stream_handler=handler)
+                if state["printed"]:
+                    print()
+                elif reply:
+                    print(reply)
+            else:
+                reply = runtime.run_turn(user_input)
+                print(reply)
         except Exception as exc:
             print(f"[error] {exc}")
 

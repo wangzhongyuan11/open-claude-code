@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, Callable
+
 from openagent.domain.tools import ToolContext
 from openagent.events.bus import EventBus
 from openagent.providers.base import BaseProvider
@@ -28,12 +30,14 @@ class AgentLoop:
         system_prompt: str | None = None,
         max_steps: int = 12,
         estimated_tokens: int = 0,
+        stream_handler: Callable[[dict[str, Any]], None] | None = None,
     ):
         return self.run_result(
             messages=messages,
             system_prompt=system_prompt,
             max_steps=max_steps,
             estimated_tokens=estimated_tokens,
+            stream_handler=stream_handler,
         ).history
 
     def run_result(
@@ -42,10 +46,12 @@ class AgentLoop:
         system_prompt: str | None = None,
         max_steps: int = 12,
         estimated_tokens: int = 0,
+        stream_handler: Callable[[dict[str, Any]], None] | None = None,
     ):
         return self.processor.process(
             messages=messages,
             system_prompt=system_prompt,
             max_steps=max_steps,
             estimated_tokens=estimated_tokens,
+            stream_handler=stream_handler,
         )

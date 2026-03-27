@@ -201,3 +201,24 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
   - `step-start`
   - `text`
   - `step-finish`
+
+## 11. Native Provider Streaming + CLI Live Output
+
+命令：
+
+```bash
+./openagent.sh --stream --prompt "请只回复 stream-live-ok。"
+```
+
+理论预期：
+
+- 终端在请求进行时直接打印文本，而不是等待整段完成后再一次性输出
+- 本轮仍会落盘正常 session
+- `.openagent/logs/<session_id>.jsonl` 中出现：
+  - `model.stream.event`
+  - `processor.part.appended`
+- `model.stream.event` 至少包括：
+  - `start`
+  - 一个或多个 `text-delta`
+  - `finish`
+- 最终 assistant message 仍应是一个正常消息对象，而不是只存在于事件流中

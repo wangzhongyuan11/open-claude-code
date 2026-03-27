@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from openagent.domain.events import Event
 from openagent.domain.messages import Message
@@ -42,6 +43,7 @@ class SessionProcessor:
         system_prompt: str | None = None,
         max_steps: int = 12,
         estimated_tokens: int = 0,
+        stream_handler: Callable[[dict[str, Any]], None] | None = None,
     ) -> ProcessorResult:
         history = list(messages)
         repeated_calls: dict[str, int] = {}
@@ -55,6 +57,7 @@ class SessionProcessor:
                 messages=history,
                 system_prompt=system_prompt,
                 estimated_tokens=estimated_tokens,
+                stream_handler=stream_handler,
             )
             history.append(assistant_message)
             if not response.requests_tools:
@@ -148,6 +151,7 @@ class SessionProcessor:
         messages: list[Message],
         system_prompt: str | None,
         estimated_tokens: int,
+        stream_handler: Callable[[dict[str, Any]], None] | None,
     ) -> tuple[object, Message]:
         builder = AssistantMessageBuilder()
         builder.start_step(requested_tools=0)
@@ -169,6 +173,8 @@ class SessionProcessor:
                 text_buffer += delta
                 builder.add_text(delta)
                 self._emit("processor.part.appended", {"role": "assistant", "part_type": "text"})
+                if stream_handler is not None:
+                    stream_handler({"type": "text-delta", "text": delta})
                 continue
             if event_type == "tool-call":
                 tool_call = event["tool_call"]
@@ -179,9 +185,13 @@ class SessionProcessor:
                     arguments=tool_call.arguments,
                 )
                 self._emit("processor.part.appended", {"role": "assistant", "part_type": "tool", "tool_name": tool_call.name})
+                if stream_handler is not None:
+                    stream_handler({"type": "tool-call", "tool_call": tool_call})
                 continue
             if event_type == "finish":
                 final_response = event["response"]
+                if stream_handler is not None:
+                    stream_handler({"type": "finish", "response": final_response})
                 break
         if final_response is None:
             raise RuntimeError("stream finished without a final response")

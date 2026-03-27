@@ -86,6 +86,7 @@ openagent --workspace . --print-session
 openagent --workspace . --session-id <session_id> --inspect
 openagent --workspace . --session-id <session_id> --replay
 openagent --workspace . --prompt "创建一个 demo.txt"
+openagent --workspace . --stream --prompt "请只回复 stream-ok。"
 ```
 
 Interactive commands:
@@ -110,6 +111,19 @@ The demo uses a fake provider and exercises a real runtime, session store, and f
 PYTHONPATH=src pytest -q
 ```
 
+Real streaming smoke check:
+
+```bash
+./openagent.sh --stream --prompt "请只回复 stream-live-ok。"
+```
+
+Expected behavior:
+
+- terminal prints assistant text deltas directly
+- `.openagent/logs/<session_id>.jsonl` contains `model.stream.event`
+- `.openagent/logs/<session_id>.jsonl` contains `processor.part.appended`
+- the persisted assistant message still contains a merged `text` part and a normal final `finish`
+
 ## Session Runtime
 
 The session layer is now the runtime center rather than a plain message store.
@@ -131,6 +145,7 @@ The processor now runs through a basic streaming pipeline:
 - `session/llm.py` emits stream events
 - `session/processor.py` incrementally appends message parts
 - final assistant/tool messages are persisted after stream completion
+- `openagent --stream` renders assistant text deltas live in the terminal
 
 The runtime prompt is assembled from:
 
@@ -163,6 +178,7 @@ See [`SESSION_TEST_TASKS.md`](./SESSION_TEST_TASKS.md) for a concrete prompt-by-
 - subagent
 - bash error path
 - processor / part persistence checks
+- native provider streaming and CLI live output
 
 ## Work Log
 

@@ -290,3 +290,40 @@ def test_streaming_processor_assembles_text_deltas_and_tool_calls(tmp_path: Path
     assistant_message = next(message for message in runtime.session.messages if message.role == "assistant")
     assert assistant_message.content == "先读取"
     assert any(part.type == "tool" for part in assistant_message.parts)
+
+
+def test_runtime_stream_handler_receives_text_deltas(tmp_path: Path):
+    class StreamingEchoProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            raise AssertionError("stream path should be used")
+
+        def stream_generate(self, messages, tools, system_prompt=None):
+            yield {"type": "start"}
+            yield {"type": "text-delta", "text": "stream-"}
+            yield {"type": "text-delta", "text": "ok"}
+            yield {
+                "type": "finish",
+                "response": AgentResponse(
+                    text="stream-ok",
+                    finish="stop",
+                ),
+            }
+
+    runtime = build_runtime(tmp_path)
+    runtime.provider = StreamingEchoProvider()
+    runtime.provider_factory = StreamingEchoProvider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    seen: list[str] = []
+    reply = runtime.run_turn(
+        "stream now",
+        stream_handler=lambda event: seen.append(event["text"]) if event["type"] == "text-delta" else None,
+    )
+
+    assert reply == "stream-ok"
+    assert seen == ["stream-", "ok"]

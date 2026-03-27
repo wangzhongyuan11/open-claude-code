@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import json
 import time
-from typing import Callable
+from typing import Any, Callable
 
 from openagent.agent.loop import AgentLoop
 from openagent.agent.subagent import SubagentManager
@@ -66,7 +66,11 @@ class AgentRuntime:
             event_bus=self.event_bus,
         )
 
-    def run_turn(self, user_text: str) -> str:
+    def run_turn(
+        self,
+        user_text: str,
+        stream_handler: Callable[[dict[str, Any]], None] | None = None,
+    ) -> str:
         self._emit("message.added", {"role": "user", "session_id": self.session.id})
         self.session_manager.append_message(
             self.session,
@@ -79,6 +83,7 @@ class AgentRuntime:
                 messages=prompt_context.messages,
                 system_prompt=prompt_context.system_prompt,
                 estimated_tokens=prompt_context.estimated_tokens,
+                stream_handler=stream_handler,
             )
             history = result.history
             new_messages = history[len(prompt_context.messages):]
