@@ -126,6 +126,18 @@ The runtime prompt is assembled from:
 - working-set context synthetic message
 - recent real messages
 
+Session metadata also tracks recent runtime state, including:
+
+- auto-generated session title from the first user turn
+- `last_finish_reason`
+- `last_loop_unstable`
+- `last_loop_steps`
+- `last_loop_tool_calls`
+- `last_prompt_notes`
+- `prompt_token_estimate`
+- `compacted_token_estimate`
+- `compaction_mode`
+
 ## Manual Validation Tasks
 
 See [`SESSION_TEST_TASKS.md`](./SESSION_TEST_TASKS.md) for a concrete prompt-by-prompt validation checklist, including:

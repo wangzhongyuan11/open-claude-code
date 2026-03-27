@@ -17,6 +17,8 @@ class ProcessorResult:
     history: list[Message]
     finish_reason: str
     unstable: bool = False
+    step_count: int = 0
+    tool_call_count: int = 0
 
 
 class SessionProcessor:
@@ -43,8 +45,11 @@ class SessionProcessor:
         history = list(messages)
         repeated_calls: dict[str, int] = {}
         last_tool_result: tuple[str, str] | None = None
+        step_count = 0
+        tool_call_count = 0
 
         for _ in range(max_steps):
+            step_count += 1
             response = self.llm.generate(
                 LLMRequest(
                     messages=history,
@@ -56,9 +61,15 @@ class SessionProcessor:
             assistant_message = self._build_assistant_message(response)
             history.append(assistant_message)
             if not response.requests_tools:
-                return ProcessorResult(history=history, finish_reason=response.finish or "stop")
+                return ProcessorResult(
+                    history=history,
+                    finish_reason=response.finish or "stop",
+                    step_count=step_count,
+                    tool_call_count=tool_call_count,
+                )
 
             for tool_call in response.tool_calls:
+                tool_call_count += 1
                 self._emit(
                     "tool.called",
                     {"name": tool_call.name, "tool_call_id": tool_call.id},
@@ -90,6 +101,8 @@ class SessionProcessor:
                             "repeat_count": repeated_calls[call_key],
                         },
                         last_tool_result=last_tool_result,
+                        step_count=step_count,
+                        tool_call_count=tool_call_count,
                     )
 
         return self._return_loop_failure(
@@ -97,6 +110,8 @@ class SessionProcessor:
             reason="max_steps_exceeded",
             details={"max_steps": max_steps},
             last_tool_result=last_tool_result,
+            step_count=step_count,
+            tool_call_count=tool_call_count,
         )
 
     def _emit(self, event_type: str, payload: dict) -> None:
@@ -114,6 +129,8 @@ class SessionProcessor:
         reason: str,
         details: dict,
         last_tool_result: tuple[str, str] | None,
+        step_count: int,
+        tool_call_count: int,
     ) -> ProcessorResult:
         self._emit("loop.failed", {"reason": reason, **details})
         message = f"Stopped because the tool loop became unstable ({reason})."
@@ -121,7 +138,13 @@ class SessionProcessor:
             tool_name, tool_output = last_tool_result
             message += f"\nLast tool: {tool_name}\nLast tool result:\n{tool_output}"
         history.append(Message(role="assistant", content=message, finish="other"))
-        return ProcessorResult(history=history, finish_reason=reason, unstable=True)
+        return ProcessorResult(
+            history=history,
+            finish_reason=reason,
+            unstable=True,
+            step_count=step_count,
+            tool_call_count=tool_call_count,
+        )
 
     @staticmethod
     def _build_assistant_message(response) -> Message:
@@ -206,6 +229,29 @@ class SessionProcessor:
                         "source": "file",
                         "path": str(path),
                         "content": content,
+                    },
+                    state={"status": status},
+                )
+            )
+        elif path and tool_name in {"write_file", "append_file", "edit_file"}:
+            parts.append(
+                Part(
+                    type="file",
+                    content={
+                        "source": "file",
+                        "path": str(path),
+                        "content": content,
+                    },
+                    state={"status": status, "mutation": tool_name},
+                )
+            )
+        elif tool_name == "delegate":
+            parts.append(
+                Part(
+                    type="subtask",
+                    content={
+                        "prompt": arguments.get("prompt", ""),
+                        "result": content,
                     },
                     state={"status": status},
                 )

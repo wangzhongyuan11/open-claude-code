@@ -65,6 +65,7 @@ def test_compaction_creates_summary_and_keeps_recent_messages(tmp_path: Path):
     status = runtime.status_report()
     assert '"summary_present": true' in status
     assert '"prompt_token_estimate":' in status
+    assert '"compaction_mode":' in status
 
 
 def test_revert_last_turn_removes_latest_user_turn(tmp_path: Path):
@@ -113,6 +114,7 @@ def test_session_manager_assigns_message_relationships(tmp_path: Path):
     assert assistant_message.session_id == runtime.session.id
     assert assistant_message.parent_id == user_message.id
     assert assistant_message.finish == "stop"
+    assert runtime.session.title == "link messages"
 
 
 def test_prompt_context_includes_summary_and_runtime_note(tmp_path: Path):
@@ -163,3 +165,50 @@ def test_processor_creates_step_and_tool_parts(tmp_path: Path):
     assert any(part.type == "step-finish" for part in assistant_messages[0].parts)
     assert any(part.type == "tool" for part in assistant_messages[0].parts)
     assert any(part.type == "file" for part in tool_messages[0].parts)
+
+
+def test_runtime_persists_prompt_and_loop_metadata(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+
+    reply = runtime.run_turn("metadata check")
+
+    assert reply == "echo:metadata check"
+    assert runtime.session.metadata["last_finish_reason"] == "stop"
+    assert runtime.session.metadata["last_loop_unstable"] == "false"
+    assert runtime.session.metadata["last_loop_steps"] == "1"
+    assert runtime.session.metadata["last_loop_tool_calls"] == "0"
+    assert runtime.session.metadata["last_prompt_notes"] is not None
+
+
+def test_delegate_tool_result_creates_subtask_part(tmp_path: Path):
+    class DelegateProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                from openagent.domain.messages import ToolCall
+
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="call-1", name="delegate", arguments={"prompt": "create a.txt"})]
+                )
+            return AgentResponse(text="delegated")
+
+    class ChildProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            return AgentResponse(text="child done")
+
+    runtime = AgentRuntime(
+        provider=DelegateProvider(),
+        provider_factory=ChildProvider,
+        workspace=tmp_path,
+        session_manager=SessionManager(SessionStore((tmp_path / ".openagent" / "sessions"))),
+        session=SessionManager(SessionStore((tmp_path / ".openagent" / "sessions"))).start(workspace=tmp_path),
+        settings=Settings.from_workspace(tmp_path),
+    )
+
+    runtime.run_turn("delegate this")
+
+    tool_message = next(message for message in runtime.session.messages if message.role == "tool" and message.name == "delegate")
+    assert any(part.type == "subtask" for part in tool_message.parts)

@@ -29,9 +29,23 @@ class AgentLoop:
         max_steps: int = 12,
         estimated_tokens: int = 0,
     ):
-        return self.processor.process(
+        return self.run_result(
             messages=messages,
             system_prompt=system_prompt,
             max_steps=max_steps,
             estimated_tokens=estimated_tokens,
         ).history
+
+    def run_result(
+        self,
+        messages,
+        system_prompt: str | None = None,
+        max_steps: int = 12,
+        estimated_tokens: int = 0,
+    ):
+        return self.processor.process(
+            messages=messages,
+            system_prompt=system_prompt,
+            max_steps=max_steps,
+            estimated_tokens=estimated_tokens,
+        )

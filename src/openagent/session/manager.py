@@ -38,6 +38,7 @@ class SessionManager:
         if mark_running_state and message.role == "user":
             mark_running(session, message.content)
         self._normalize_message(session, message)
+        self._ensure_title(session, message)
         session.messages.append(message)
         session.touch()
         self.store.save(session)
@@ -67,6 +68,9 @@ class SessionManager:
             max_prompt_tokens=self.prompt_max_tokens,
         )
         apply_compaction(session, plan)
+        session.metadata["last_prompt_notes"] = "|".join(plan_to_prompt_notes(plan))
+        session.metadata["last_prompt_message_count"] = str(len(plan.recent_messages))
+        session.metadata["last_prompt_message_ids"] = ",".join(message.id for message in plan.recent_messages[-12:])
         self.store.save(session)
         return build_prompt_context(session, system_prompt, plan)
 
@@ -128,8 +132,30 @@ class SessionManager:
             message.agent = "main"
 
     @staticmethod
+    def _ensure_title(session: Session, message: Message) -> None:
+        if session.title or message.role != "user":
+            return
+        title = message.content.strip().replace("\n", " ")
+        session.title = (title[:77] + "...") if len(title) > 80 else title
+
+    @staticmethod
     def _last_message_id(session: Session, role: str) -> str | None:
         for message in reversed(session.messages):
             if message.role == role:
                 return message.id
         return None
+
+
+def plan_to_prompt_notes(plan) -> list[str]:
+    notes: list[str] = []
+    if plan.changed:
+        notes.append("compacted")
+    if plan.overflow_by_count:
+        notes.append("overflow:message-count")
+    if plan.overflow_by_tokens:
+        notes.append("overflow:token-budget")
+    if plan.recent_tools:
+        notes.append("recent-tools:" + ",".join(plan.recent_tools[:4]))
+    if plan.recent_files:
+        notes.append("recent-files:" + ",".join(plan.recent_files[:4]))
+    return notes

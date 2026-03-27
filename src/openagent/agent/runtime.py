@@ -74,17 +74,25 @@ class AgentRuntime:
         )
         prompt_context = self.session_manager.build_prompt(self.session, self.system_prompt)
         try:
-            history = self.loop.run(
+            result = self.loop.run_result(
                 messages=prompt_context.messages,
                 system_prompt=prompt_context.system_prompt,
                 estimated_tokens=prompt_context.estimated_tokens,
             )
+            history = result.history
             new_messages = history[len(prompt_context.messages):]
             self.session_manager.append_turn_messages(self.session, new_messages)
+            self.session.metadata["last_finish_reason"] = result.finish_reason
+            self.session.metadata["last_loop_unstable"] = "true" if result.unstable else "false"
+            self.session.metadata["last_loop_steps"] = str(result.step_count)
+            self.session.metadata["last_loop_tool_calls"] = str(result.tool_call_count)
+            self.session.metadata["last_prompt_notes"] = "|".join(prompt_context.notes)
             last_assistant = next(
                 (message.content for message in reversed(self.session.messages) if message.role == "assistant"),
                 "",
             )
+            self.session.touch()
+            self.session_manager.store.save(self.session)
             self._emit("loop.completed", {"session_id": self.session.id, "assistant_length": len(last_assistant)})
             logger.info("Completed turn for session %s", self.session.id)
             return last_assistant
@@ -100,6 +108,7 @@ class AgentRuntime:
     def status_report(self) -> str:
         payload = {
             "session_id": self.session.id,
+            "title": self.session.title,
             "state": self.session.status.state,
             "retry_count": self.session.status.retry_count,
             "last_error": self.session.status.last_error,
@@ -110,6 +119,12 @@ class AgentRuntime:
             "todo_count": len(self.session.todos),
             "prompt_token_estimate": self.session.metadata.get("prompt_token_estimate"),
             "compacted_token_estimate": self.session.metadata.get("compacted_token_estimate"),
+            "compaction_mode": self.session.metadata.get("compaction_mode"),
+            "last_prompt_notes": self.session.metadata.get("last_prompt_notes"),
+            "last_finish_reason": self.session.metadata.get("last_finish_reason"),
+            "last_loop_unstable": self.session.metadata.get("last_loop_unstable"),
+            "last_loop_steps": self.session.metadata.get("last_loop_steps"),
+            "last_loop_tool_calls": self.session.metadata.get("last_loop_tool_calls"),
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
 

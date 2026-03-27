@@ -15,6 +15,7 @@
 - assistant 只回复 `session-smoke-ok`
 - 本轮 assistant message 的 `finish` 为 `stop`
 - session.json 中这轮 user/assistant message 都带 `session_id`
+- session title 会自动设为第一轮用户请求的截断文本
 
 ## 2. 文件读取 + tool-use 协议
 
@@ -96,6 +97,9 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
   - `compacted_token_estimate`
   - `prompt_window_message_count`
   - `compaction_mode`
+  - `last_finish_reason`
+  - `last_loop_steps`
+  - `last_loop_tool_calls`
 - 从 session 构建 prompt 时，前两条 synthetic message 分别是：
   - `agent=summary`
   - `agent=context`
