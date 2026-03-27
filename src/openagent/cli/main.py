@@ -14,6 +14,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-id", default=None, help="Resume an existing session")
     parser.add_argument("--list-sessions", action="store_true", help="List local sessions and exit")
     parser.add_argument("--print-session", action="store_true", help="Print the current session id and exit")
+    parser.add_argument("--inspect", action="store_true", help="Print a structured session inspection view and exit")
+    parser.add_argument("--replay", action="store_true", help="Print a turn-by-turn session replay view and exit")
     parser.add_argument("--prompt", default=None, help="Run one prompt and exit")
     return parser
 
@@ -47,6 +49,14 @@ def main() -> None:
         _print_session_summary(runtime)
         return
 
+    if args.inspect:
+        print(runtime.inspect_session())
+        return
+
+    if args.replay:
+        print(runtime.replay_session())
+        return
+
     if args.prompt is not None:
         _print_session_summary(runtime)
         _run_once(runtime, args.prompt)
@@ -73,6 +83,12 @@ def main() -> None:
             continue
         if user_input == "/status":
             print(runtime.status_report())
+            continue
+        if user_input == "/inspect":
+            print(runtime.inspect_session())
+            continue
+        if user_input == "/replay":
+            print(runtime.replay_session())
             continue
         if user_input == "/compact":
             print(runtime.compact_session())

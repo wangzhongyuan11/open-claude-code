@@ -82,6 +82,8 @@ openagent --workspace .
 openagent --workspace . --list-sessions
 openagent --workspace . --session-id <session_id>
 openagent --workspace . --print-session
+openagent --workspace . --session-id <session_id> --inspect
+openagent --workspace . --session-id <session_id> --replay
 openagent --workspace . --prompt "创建一个 demo.txt"
 ```
 
@@ -89,6 +91,8 @@ Interactive commands:
 
 - `/session`
 - `/history`
+- `/inspect`
+- `/replay`
 - `/exit`
 
 ## Minimal Demo
@@ -112,11 +116,13 @@ The session layer is now the runtime center rather than a plain message store.
 - `session/store.py`: persistence and schema migration
 - `session/manager.py`: session orchestration and prompt preparation
 - `session/processor.py`: message processing loop for LLM/tool interactions
+- `session/message_builder.py`: incremental part builders for assistant/tool messages
 - `session/llm.py`: provider invocation wrapper with event emission
 - `session/prompt.py`: prompt/context assembly
 - `session/compaction.py`: prompt-window planning and historical compaction
 - `session/summary.py`: session summary generation
 - `session/system.py`: session-aware system prompt construction
+- `session/inspect.py`: inspect/replay views over persisted session state
 
 The runtime prompt is assembled from:
 

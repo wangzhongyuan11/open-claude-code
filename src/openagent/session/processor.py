@@ -4,11 +4,12 @@ import json
 from dataclasses import dataclass
 
 from openagent.domain.events import Event
-from openagent.domain.messages import Message, Part
+from openagent.domain.messages import Message
 from openagent.domain.tools import ToolContext
 from openagent.events.bus import EventBus
 from openagent.providers.base import BaseProvider
 from openagent.session.llm import LLMRequest, SessionLLM
+from openagent.session.message_builder import AssistantMessageBuilder, ToolMessageBuilder
 from openagent.tools.registry import ToolRegistry
 
 
@@ -146,48 +147,34 @@ class SessionProcessor:
             tool_call_count=tool_call_count,
         )
 
-    @staticmethod
-    def _build_assistant_message(response) -> Message:
+    def _build_assistant_message(self, response) -> Message:
         finish = response.finish or ("tool-calls" if response.tool_calls else "stop")
-        parts: list[Part] = [
-            Part(
-                type="step-start",
-                content={"phase": "llm", "requested_tools": len(response.tool_calls)},
-                state={"status": "started"},
-            )
-        ]
+        builder = AssistantMessageBuilder()
+        builder.start_step(requested_tools=len(response.tool_calls))
+        self._emit("processor.part.appended", {"role": "assistant", "part_type": "step-start"})
         if response.text:
-            parts.append(Part(type="text", content=response.text))
+            builder.add_text(response.text)
+            self._emit("processor.part.appended", {"role": "assistant", "part_type": "text"})
         for tool_call in response.tool_calls:
-            parts.append(
-                Part(
-                    type="tool",
-                    content={
-                        "id": tool_call.id,
-                        "name": tool_call.name,
-                        "arguments": tool_call.arguments,
-                    },
-                    state={"status": "requested"},
-                )
+            builder.add_tool_request(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                arguments=tool_call.arguments,
             )
-        parts.append(
-            Part(
-                type="step-finish",
-                content={
-                    "finish": finish,
-                    "tokens": {
-                        "input": response.tokens.input,
-                        "output": response.tokens.output,
-                        "reasoning": response.tokens.reasoning,
-                        "cache_read": response.tokens.cache_read,
-                        "cache_write": response.tokens.cache_write,
-                    },
-                    "cost": response.cost,
-                },
-                state={"status": "completed"},
-            )
+            self._emit("processor.part.appended", {"role": "assistant", "part_type": "tool", "tool_name": tool_call.name})
+        builder.finish_step(
+            finish=finish,
+            tokens={
+                "input": response.tokens.input,
+                "output": response.tokens.output,
+                "reasoning": response.tokens.reasoning,
+                "cache_read": response.tokens.cache_read,
+                "cache_write": response.tokens.cache_write,
+            },
+            cost=response.cost,
         )
-        return Message(
+        self._emit("processor.part.appended", {"role": "assistant", "part_type": "step-finish", "finish": finish})
+        return builder.build(
             role="assistant",
             content=response.text,
             model=response.model,
@@ -196,70 +183,26 @@ class SessionProcessor:
             finish=finish,
             error=response.error,
             tool_calls=response.tool_calls,
-            parts=parts,
         )
 
-    @staticmethod
-    def _build_tool_message(
-        tool_name: str,
-        tool_call_id: str,
-        arguments: dict,
-        content: str,
-        is_error: bool,
-    ) -> Message:
-        status = "error" if is_error else "completed"
-        parts: list[Part] = [
-            Part(
-                type="tool",
-                content={
-                    "tool_call_id": tool_call_id,
-                    "name": tool_name,
-                    "arguments": arguments,
-                    "output": content,
-                },
-                state={"status": status},
-            )
-        ]
+    def _build_tool_message(self, tool_name: str, tool_call_id: str, arguments: dict, content: str, is_error: bool) -> Message:
+        builder = ToolMessageBuilder(
+            name=tool_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+            content=content,
+            is_error=is_error,
+        )
+        builder.add_tool_result()
+        self._emit("processor.part.appended", {"role": "tool", "part_type": "tool", "tool_name": tool_name})
         path = arguments.get("path")
         if path and tool_name == "read_file":
-            parts.append(
-                Part(
-                    type="file",
-                    content={
-                        "source": "file",
-                        "path": str(path),
-                        "content": content,
-                    },
-                    state={"status": status},
-                )
-            )
+            builder.add_file_result()
+            self._emit("processor.part.appended", {"role": "tool", "part_type": "file", "tool_name": tool_name})
         elif path and tool_name in {"write_file", "append_file", "edit_file"}:
-            parts.append(
-                Part(
-                    type="file",
-                    content={
-                        "source": "file",
-                        "path": str(path),
-                        "content": content,
-                    },
-                    state={"status": status, "mutation": tool_name},
-                )
-            )
+            builder.add_file_result(mutation=tool_name)
+            self._emit("processor.part.appended", {"role": "tool", "part_type": "file", "tool_name": tool_name})
         elif tool_name == "delegate":
-            parts.append(
-                Part(
-                    type="subtask",
-                    content={
-                        "prompt": arguments.get("prompt", ""),
-                        "result": content,
-                    },
-                    state={"status": status},
-                )
-            )
-        return Message(
-            role="tool",
-            content=content,
-            tool_call_id=tool_call_id,
-            name=tool_name,
-            parts=parts,
-        )
+            builder.add_subtask_result()
+            self._emit("processor.part.appended", {"role": "tool", "part_type": "subtask", "tool_name": tool_name})
+        return builder.build()

@@ -153,3 +153,28 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
 - tool message 中是否有：
   - `tool`
   - `file`（针对 `read_file`）
+
+## 9. Inspect / Replay
+
+命令：
+
+```bash
+./openagent.sh --session-id <session_id> --inspect
+./openagent.sh --session-id <session_id> --replay
+```
+
+理论预期：
+
+- `--inspect` 输出结构化 JSON
+- 能看到：
+  - `title`
+  - `status`
+  - `metadata`
+  - `recent_messages`
+  - 每条 recent message 的 `parts`
+- `--replay` 输出 turn-by-turn 文本回放
+- 至少能看到：
+  - `Turn N`
+  - `User: ...`
+  - `Assistant: finish=...`
+  - 若有工具调用，则看到 `ToolRequest` / `ToolResult`

@@ -179,6 +179,12 @@ def test_runtime_persists_prompt_and_loop_metadata(tmp_path: Path):
     assert runtime.session.metadata["last_loop_tool_calls"] == "0"
     assert runtime.session.metadata["last_prompt_notes"] is not None
 
+    inspect = runtime.inspect_session()
+    replay = runtime.replay_session()
+    assert '"last_finish_reason": "stop"' in inspect
+    assert "Turn 1" in replay
+    assert "User: metadata check" in replay
+
 
 def test_delegate_tool_result_creates_subtask_part(tmp_path: Path):
     class DelegateProvider(BaseProvider):
@@ -212,3 +218,35 @@ def test_delegate_tool_result_creates_subtask_part(tmp_path: Path):
 
     tool_message = next(message for message in runtime.session.messages if message.role == "tool" and message.name == "delegate")
     assert any(part.type == "subtask" for part in tool_message.parts)
+
+
+def test_write_file_tool_result_creates_file_mutation_part(tmp_path: Path):
+    class WriteProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                from openagent.domain.messages import ToolCall
+
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="call-1", name="write_file", arguments={"path": "x.txt", "content": "abc"})]
+                )
+            return AgentResponse(text="done")
+
+    runtime = build_runtime(tmp_path)
+    runtime.provider = WriteProvider()
+    runtime.provider_factory = WriteProvider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    runtime.run_turn("write file")
+
+    tool_message = next(message for message in runtime.session.messages if message.role == "tool" and message.name == "write_file")
+    file_part = next(part for part in tool_message.parts if part.type == "file")
+    assert file_part.state["mutation"] == "write_file"

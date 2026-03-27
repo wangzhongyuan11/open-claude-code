@@ -17,6 +17,7 @@ from openagent.events.logger import get_logger
 from openagent.providers.base import BaseProvider
 from openagent.providers.factory import build_provider
 from openagent.session.manager import SessionManager
+from openagent.session.inspect import format_session_inspect, format_session_replay
 from openagent.session.store import SessionStore
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.delegate import DelegateTool
@@ -127,6 +128,12 @@ class AgentRuntime:
             "last_loop_tool_calls": self.session.metadata.get("last_loop_tool_calls"),
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def inspect_session(self, limit: int = 12) -> str:
+        return format_session_inspect(self.session, limit=limit)
+
+    def replay_session(self) -> str:
+        return format_session_replay(self.session)
 
     def compact_session(self) -> str:
         changed = self.session_manager.compact(self.session)
