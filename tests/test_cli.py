@@ -1,6 +1,6 @@
 from argparse import Namespace
 
-from openagent.cli.main import build_parser
+from openagent.cli.main import _read_repl_input, build_parser
 
 
 def test_cli_parser_accepts_prompt_and_print_session():
@@ -13,3 +13,30 @@ def test_cli_parser_accepts_prompt_and_print_session():
     assert args.status is True
     assert args.prompt == "hello"
     assert args.stream is True
+
+
+def test_repl_reader_collects_multiline_until_end(monkeypatch):
+    inputs = iter(["第一行", "第二行", "/end"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    item = _read_repl_input()
+
+    assert item == ("message", "第一行\n第二行")
+
+
+def test_repl_reader_executes_command_only_when_buffer_empty(monkeypatch):
+    inputs = iter(["/status"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    item = _read_repl_input()
+
+    assert item == ("command", "/status")
+
+
+def test_repl_reader_cancel_discards_buffer(monkeypatch):
+    inputs = iter(["第一行", "/cancel", "/status"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    item = _read_repl_input()
+
+    assert item == ("command", "/status")

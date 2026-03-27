@@ -8,6 +8,18 @@ from openagent.agent.runtime import build_default_runtime, build_session_manager
 from openagent.config.env import load_dotenv
 from openagent.session.todo import render_todos
 
+SHELL_COMMANDS = {
+    "/session",
+    "/history",
+    "/status",
+    "/inspect",
+    "/replay",
+    "/compact",
+    "/revert",
+    "/retry",
+    "/todos",
+}
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Minimal coding agent CLI")
@@ -51,6 +63,37 @@ def _run_once(runtime, prompt: str, stream: bool = False) -> None:
         print(reply)
 
 
+def _read_repl_input() -> tuple[str, str] | None:
+    buffer: list[str] = []
+    while True:
+        prompt = "openagent> " if not buffer else "... "
+        try:
+            raw_line = input(prompt)
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+        line = raw_line.rstrip("\n")
+        stripped = line.strip()
+        if not buffer:
+            if not stripped:
+                continue
+            if stripped in {"/exit", "exit", "quit"}:
+                return ("command", "/exit")
+            if stripped in SHELL_COMMANDS or stripped.startswith("/todo "):
+                return ("command", stripped)
+        if stripped == "/cancel":
+            print("[cancelled]")
+            buffer.clear()
+            continue
+        if stripped == "/end":
+            message = "\n".join(buffer).strip("\n")
+            if not message.strip():
+                buffer.clear()
+                continue
+            return ("message", message)
+        buffer.append(line)
+
+
 def main() -> None:
     load_dotenv()
     parser = build_parser()
@@ -89,46 +132,44 @@ def main() -> None:
         return
 
     _print_session_summary(runtime)
+    print("输入多行消息后，用 /end 提交；输入 /cancel 放弃当前输入。Slash 命令需要在空输入状态下单独输入。")
 
     while True:
-        try:
-            user_input = input("openagent> ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
+        item = _read_repl_input()
+        if item is None:
             break
-        if not user_input:
-            continue
+        item_type, user_input = item
         if user_input in {"/exit", "exit", "quit"}:
             break
-        if user_input == "/session":
+        if item_type == "command" and user_input == "/session":
             print(runtime.session_id)
             continue
-        if user_input == "/history":
+        if item_type == "command" and user_input == "/history":
             for message in runtime.session.messages:
                 print(f"[{message.role}] {message.content}")
             continue
-        if user_input == "/status":
+        if item_type == "command" and user_input == "/status":
             print(runtime.status_report())
             continue
-        if user_input == "/inspect":
+        if item_type == "command" and user_input == "/inspect":
             print(runtime.inspect_session())
             continue
-        if user_input == "/replay":
+        if item_type == "command" and user_input == "/replay":
             print(runtime.replay_session())
             continue
-        if user_input == "/compact":
+        if item_type == "command" and user_input == "/compact":
             print(runtime.compact_session())
             continue
-        if user_input == "/revert":
+        if item_type == "command" and user_input == "/revert":
             print(runtime.revert_last_turn())
             continue
-        if user_input == "/retry":
+        if item_type == "command" and user_input == "/retry":
             print(runtime.retry_last_turn())
             continue
-        if user_input == "/todos":
+        if item_type == "command" and user_input == "/todos":
             print(render_todos(runtime.session))
             continue
-        if user_input.startswith("/todo "):
+        if item_type == "command" and user_input.startswith("/todo "):
             parts = shlex.split(user_input)
             if len(parts) >= 3 and parts[1] == "add":
                 print(runtime.add_todo(" ".join(parts[2:])))

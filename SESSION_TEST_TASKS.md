@@ -2,6 +2,17 @@
 
 以下任务用于真实验证 `openagent` 的 session 主干、message/part 协议、processor、prompt/context、compaction/summary。
 
+## 0. REPL 多行输入
+
+进入交互模式后，不再是一行一提交。
+
+规则：
+
+- 普通内容会进入当前输入缓冲区
+- 只有输入 `/end` 才真正提交这条消息
+- 输入 `/cancel` 会放弃当前缓冲区
+- `/status`、`/inspect`、`/replay` 等 slash 命令必须在空缓冲状态下单独输入
+
 ## 1. 最小文本往返
 
 输入：

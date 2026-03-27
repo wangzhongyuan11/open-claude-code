@@ -97,7 +97,16 @@ Interactive commands:
 - `/history`
 - `/inspect`
 - `/replay`
+- `/end`
+- `/cancel`
 - `/exit`
+
+Interactive input mode:
+
+- REPL now buffers multiline input by default
+- only `/end` submits the current message
+- `/cancel` discards the current buffered message
+- slash commands such as `/status` or `/inspect` must be entered on an empty buffer
 
 ## Minimal Demo
 
