@@ -309,16 +309,30 @@ Current built-in local tools:
 - `ls`
 - `glob`
 - `grep`
+- `codesearch`
 - `read_file`
 - `read_file_range`
+- `read`
 - `write_file`
+- `write`
 - `append_file`
 - `edit_file`
+- `edit`
 - `multiedit`
 - `apply_patch`
+- `patch`
 - `list_files`
 - `bash`
 - `delegate`
+- `task`
+- `todowrite`
+- `todoread`
+- `question`
+- `skill`
+- `lsp`
+- `batch`
+- `webfetch`
+- `websearch`
 
 The local coding toolchain now covers the common repository workflow:
 
@@ -329,6 +343,23 @@ The local coding toolchain now covers the common repository workflow:
 - write/append/edit files
 - apply a unified diff patch
 - run shell commands when a shell-native action is really needed
+
+Additional opencode-style integrations now available:
+
+- `task`
+  - delegates a focused subtask to a subagent and returns a structured `<task_result>` block
+- `todowrite` / `todoread`
+  - read and replace the persisted session todo list through the tool runtime
+- `question`
+  - asks clarifying questions through the interactive CLI question handler
+- `skill`
+  - loads a `SKILL.md` from configured skill roots and injects it as structured context
+- `lsp`
+  - provides AST-based Python fallback navigation plus a hook for an external LSP handler
+- `batch`
+  - executes multiple tool calls sequentially through the runtime and returns a structured summary
+- `webfetch` / `websearch`
+  - fetch public web resources and perform lightweight web search with structured metadata
 
 ## Manual Validation Tasks
 
@@ -351,11 +382,19 @@ Example continuous CLI validation chain for the tool runtime:
 
 - inspect `src/openagent/tools` with `ls` / `glob`
 - locate `tool.pending` and `tool.succeeded` with `grep`
-- create a deliberately broken sample module under `work/cli_chain_v2`
+- create a deliberately broken sample module under `work/tool_runtime_chain`
 - run `pytest` with `bash` and observe failure
 - repair the file with `apply_patch`
 - rerun `pytest`
+- delegate a note-creation subtask with `task`
+- persist follow-up work with `todowrite` / `todoread`
 - confirm the final file content and test result
+
+Observed real-world recovery cases during validation:
+
+- the CLI originally crashed because `AgentLoop` did not expose its `tool_context`; fixed by retaining `tool_context` on the loop object so runtime callbacks such as `question` can be injected safely
+- `grep` originally failed when the model supplied an absolute `path_glob` inside the workspace; fixed by normalizing workspace-absolute globs before matching
+- `read_file_range` originally rejected `start_line=0`; fixed by clamping the start line to 1 so the processor can recover from zero-based line guesses more gracefully
 
 ## Work Log
 

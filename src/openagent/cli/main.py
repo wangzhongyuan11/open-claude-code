@@ -82,6 +82,25 @@ def _run_once(runtime, prompt: str, stream: bool = False) -> None:
         print(reply)
 
 
+def _question_handler(questions: list[dict[str, Any]]) -> list[str]:
+    answers: list[str] = []
+    print("[question] Agent needs clarification.")
+    for index, item in enumerate(questions, start=1):
+        prompt = item.get("question", f"Question #{index}")
+        header = item.get("header")
+        if header:
+            print(f"[question:{header}] {prompt}")
+        else:
+            print(f"[question] {prompt}")
+        try:
+            answer = input("answer> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            answer = ""
+        answers.append(answer or "Unanswered")
+    return answers
+
+
 def _read_repl_input() -> tuple[str, str] | None:
     buffer: list[str] = []
     while True:
@@ -128,6 +147,7 @@ def main() -> None:
         workspace=args.workspace,
         session_id=args.session_id,
     )
+    runtime.set_question_handler(_question_handler)
 
     if args.print_session:
         _print_session_summary(runtime)

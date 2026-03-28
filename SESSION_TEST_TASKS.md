@@ -259,6 +259,29 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
   - `tool`
   - `file`
 
+## 13. Tool Runtime Extended Chain
+
+使用同一个 session 连续执行下面至少 6 轮：
+
+1. 让 agent 用 `ls` / `glob` / `read_file` 检查 `src/openagent/tools` 和 `src/openagent/agent/runtime.py`
+2. 在 `work/tool_runtime_chain` 下创建一个故意失败的 `math_utils.py` 和 `test_math_utils.py`
+3. 用 `bash` 运行 `pytest`，只观察失败，不修复
+4. 用 `read_file_range` + `apply_patch` 修复 `return a - b`
+5. 再次用 `bash` 跑测试，并用 `grep` 或 `codesearch` 确认 `return a + b`
+6. 用 `task` 委托子代理创建 `notes.txt`
+7. 用 `todowrite` 写入两个 todo，再用 `todoread` 读取
+
+理论预期：
+
+- 同一个 session 内保持上下文连续
+- 至少出现 3 种以上工具
+- 必须出现一次真实失败，再出现真实修复
+- 最终外部验证：
+  - `work/tool_runtime_chain/math_utils.py` 返回 `a + b`
+  - `python -m pytest test_math_utils.py -q` 结果为 `1 passed`
+  - `work/tool_runtime_chain/notes.txt` 内容为 `done-by-task`
+  - session.json 中 todo 列表包含两条记录
+
 ## 13. 多步 Checklist 任务不应提前结束
 
 输入：

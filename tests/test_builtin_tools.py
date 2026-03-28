@@ -69,6 +69,15 @@ def test_read_file_range_tool(tmp_path: Path):
     assert result.content == "two\nthree"
 
 
+def test_read_file_range_tool_clamps_zero_to_first_line(tmp_path: Path):
+    context = ToolContext(workspace=tmp_path)
+    (tmp_path / "a.txt").write_text("one\ntwo\n", encoding="utf-8")
+
+    result = ReadFileRangeTool().invoke({"path": "a.txt", "start_line": 0, "end_line": 1}, context)
+
+    assert result.content == "one"
+
+
 def test_ls_glob_and_grep_tools(tmp_path: Path):
     context = ToolContext(workspace=tmp_path)
     (tmp_path / "pkg").mkdir()
@@ -94,6 +103,16 @@ def test_grep_tool_supports_recursive_double_star_glob(tmp_path: Path):
     result = GrepTool().invoke({"pattern": "def add", "path_glob": "work/cli_chain/**/*.py"}, context)
 
     assert "work/cli_chain/math_utils.py:1: def add(a, b):" in result.content
+
+
+def test_grep_tool_accepts_workspace_absolute_path_glob(tmp_path: Path):
+    context = ToolContext(workspace=tmp_path)
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "mod.py").write_text("TOKEN = 1\n", encoding="utf-8")
+
+    result = GrepTool().invoke({"pattern": "TOKEN", "path_glob": str(tmp_path / "pkg" / "*.py")}, context)
+
+    assert "pkg/mod.py:1: TOKEN = 1" in result.content
 
 
 def test_apply_patch_tool(tmp_path: Path):

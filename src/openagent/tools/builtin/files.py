@@ -64,9 +64,9 @@ class ReadFileRangeTool(BaseTool):
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         path = resolve_workspace_path(context.workspace, arguments["path"])
-        start_line = int(arguments["start_line"])
-        end_line = int(arguments["end_line"])
-        if start_line <= 0 or end_line < start_line:
+        start_line = max(1, int(arguments["start_line"]))
+        end_line = max(start_line, int(arguments["end_line"]))
+        if end_line < start_line:
             return ToolExecutionResult.failure(
                 "invalid line range",
                 error_type="invalid_range",

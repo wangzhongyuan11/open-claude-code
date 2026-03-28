@@ -29,8 +29,11 @@ from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.delegate import DelegateTool
 from openagent.tools.builtin.edit import EditFileTool, MultiEditTool
 from openagent.tools.builtin.files import AppendFileTool, ListFilesTool, ReadFileTool, ReadFileRangeTool, WriteFileTool
+from openagent.tools.builtin.integration import BatchTool, CodeSearchTool, LspTool, QuestionTool, SkillTool
 from openagent.tools.builtin.patch import ApplyPatchTool
+from openagent.tools.builtin.aliases import EditTool, PatchTool, ReadTool, TaskTool, TodoReadTool, TodoWriteTool, WriteTool
 from openagent.tools.builtin.search import GlobTool, GrepTool, LsTool
+from openagent.tools.builtin.web import WebFetchTool, WebSearchTool
 from openagent.tools.registry import ToolRegistry
 
 
@@ -38,6 +41,7 @@ DEFAULT_SYSTEM_PROMPT = """You are a Python coding agent working in a local repo
 Use tools when needed.
 Prefer reading files before editing them.
 Prefer dedicated tools (`ls`, `glob`, `grep`, `read_file`, `read_file_range`, `write_file`, `append_file`, `edit_file`, `apply_patch`) over `bash` whenever they are sufficient for the task.
+You also have opencode-style aliases (`read`, `write`, `edit`, `patch`, `task`, `todowrite`, `todoread`, `question`, `skill`, `lsp`, `codesearch`, `batch`, `webfetch`, `websearch`) that should be used deliberately when they better match the user's request.
 For plain workspace file reads, use `read_file` or `read_file_range` instead of `bash`.
 For directory inspection, use `ls` or `glob` instead of `bash`.
 For repository text search, use `grep` instead of `bash`.
@@ -87,6 +91,7 @@ class AgentRuntime:
         self.event_bus = event_bus
         self.provider_factory = provider_factory or (lambda: self.provider)
         self.system_prompt = system_prompt
+        self.question_handler: Callable[[list[dict[str, Any]]], list[str]] | None = None
         self.subagent_manager = self._build_subagent_manager()
         self.registry = self._build_registry()
         self.loop = AgentLoop(
@@ -97,7 +102,7 @@ class AgentRuntime:
                 session_id=self.session.id,
                 agent_name="main",
                 event_bus=self.event_bus,
-                runtime_state={"mode": "runtime"},
+                runtime_state=self._tool_runtime_state("main"),
             ),
             event_bus=self.event_bus,
         )
@@ -228,6 +233,10 @@ class AgentRuntime:
         self.session_manager.clear_todos(self.session)
         return "Cleared todos."
 
+    def set_question_handler(self, handler: Callable[[list[dict[str, Any]]], list[str]] | None) -> None:
+        self.question_handler = handler
+        self.loop.tool_context.runtime_state = self._tool_runtime_state("main")
+
     def _build_subagent_manager(self) -> SubagentManager:
         return SubagentManager(
             provider_factory=self.provider_factory,
@@ -241,34 +250,100 @@ class AgentRuntime:
         registry = ToolRegistry()
         registry.register(ReadFileTool())
         registry.register(ReadFileRangeTool())
+        registry.register(ReadTool())
         registry.register(WriteFileTool())
+        registry.register(WriteTool())
         registry.register(AppendFileTool())
         registry.register(EditFileTool())
+        registry.register(EditTool())
         registry.register(MultiEditTool())
         registry.register(ApplyPatchTool())
+        registry.register(PatchTool())
         registry.register(ListFilesTool())
         registry.register(LsTool())
         registry.register(GlobTool())
         registry.register(GrepTool())
+        registry.register(CodeSearchTool())
+        registry.register(WebFetchTool())
+        registry.register(WebSearchTool())
+        registry.register(QuestionTool())
+        registry.register(SkillTool())
+        registry.register(LspTool())
+        registry.register(BatchTool())
+        registry.register(TodoWriteTool())
+        registry.register(TodoReadTool())
         registry.register(BashTool(timeout_seconds=self.settings.bash_timeout_seconds))
         registry.register(DelegateTool(self.subagent_manager))
+        registry.register(TaskTool(self.subagent_manager))
         return registry
 
     def _build_subagent_registry(self) -> ToolRegistry:
         registry = ToolRegistry()
         registry.register(ReadFileTool())
         registry.register(ReadFileRangeTool())
+        registry.register(ReadTool())
         registry.register(WriteFileTool())
+        registry.register(WriteTool())
         registry.register(AppendFileTool())
         registry.register(EditFileTool())
+        registry.register(EditTool())
         registry.register(MultiEditTool())
         registry.register(ApplyPatchTool())
+        registry.register(PatchTool())
         registry.register(ListFilesTool())
         registry.register(LsTool())
         registry.register(GlobTool())
         registry.register(GrepTool())
+        registry.register(CodeSearchTool())
+        registry.register(WebFetchTool())
+        registry.register(WebSearchTool())
+        registry.register(SkillTool())
+        registry.register(LspTool())
+        registry.register(BatchTool())
+        registry.register(TodoReadTool())
         registry.register(BashTool(timeout_seconds=self.settings.bash_timeout_seconds))
         return registry
+
+    def _tool_runtime_state(self, agent_name: str) -> dict[str, Any]:
+        return {
+            "mode": "runtime",
+            "session": self.session,
+            "get_todos": lambda: list(self.session.todos),
+            "set_todos": self._set_todos,
+            "invoke_tool": self._invoke_tool_from_runtime,
+            "question_handler_available": str(self.question_handler is not None).lower(),
+            "ask_questions": self.question_handler,
+            "skill_roots": self._skill_roots(),
+            "agent_name": agent_name,
+        }
+
+    def _set_todos(self, todos: list) -> None:
+        self.session.todos = todos
+        self.session.touch()
+        self.session_manager.store.save(self.session)
+
+    def _invoke_tool_from_runtime(self, tool_name: str, arguments: dict[str, Any], parent_context: ToolContext | None = None):
+        context = ToolContext(
+            workspace=self.workspace,
+            session_id=self.session.id,
+            message_id=parent_context.message_id if parent_context else None,
+            tool_call_id=parent_context.tool_call_id if parent_context else None,
+            agent_name=parent_context.agent_name if parent_context else "main",
+            event_bus=self.event_bus,
+            runtime_state=self._tool_runtime_state(parent_context.agent_name if parent_context else "main"),
+        )
+        if parent_context and parent_context.metadata:
+            context.metadata.update(parent_context.metadata)
+        return self.registry.invoke(tool_name, arguments, context)
+
+    @staticmethod
+    def _skill_roots() -> list[str]:
+        roots = ["/root/.codex/skills", str((Path.cwd() / ".codex" / "skills").resolve())]
+        seen: list[str] = []
+        for root in roots:
+            if root not in seen:
+                seen.append(root)
+        return seen
 
     def _emit(self, event_type: str, payload: dict) -> None:
         if self.event_bus is None:

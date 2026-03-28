@@ -12,16 +12,30 @@ from openagent.tools.builtin.files import IGNORED_TOP_LEVEL_NAMES, resolve_works
 
 def _iter_workspace_files(workspace: Path, pattern: str | None = None) -> list[Path]:
     paths: list[Path] = []
+    normalized_pattern = _normalize_workspace_glob(workspace, pattern) if pattern else None
     for path in sorted(workspace.rglob("*")):
         if not path.is_file():
             continue
         relative = path.relative_to(workspace)
         if any(part in IGNORED_TOP_LEVEL_NAMES for part in relative.parts):
             continue
-        if pattern and not _matches_glob(relative, pattern):
+        if normalized_pattern and not _matches_glob(relative, normalized_pattern):
             continue
         paths.append(path)
     return paths
+
+
+def _normalize_workspace_glob(workspace: Path, pattern: str | None) -> str | None:
+    if not pattern:
+        return pattern
+    candidate = Path(pattern)
+    if not candidate.is_absolute():
+        return pattern
+    workspace = workspace.resolve()
+    candidate = candidate.resolve()
+    if workspace != candidate and workspace not in candidate.parents:
+        return pattern
+    return candidate.relative_to(workspace).as_posix()
 
 
 def _matches_glob(relative: Path, pattern: str) -> bool:
