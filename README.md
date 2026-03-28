@@ -300,6 +300,11 @@ How agent selection works:
 - `/agent <name>` switches the active primary agent inside the current session
 - `--agent-create <description>` and `/agent create <description>` generate and persist a custom agent
 - `--agent-show <name>` and `/agent show <name>` inspect a built-in or persisted custom agent
+- the runtime can auto-route between `build` and `plan` based on the user turn:
+  - planning / read-only requests auto-switch `build -> plan`
+  - implementation requests auto-switch `plan -> build`
+- exploration-style requests from `build` or other read-only agents can auto-delegate to the `explore` subagent
+- every automatic switch or delegation is persisted as an `agent` part in session history so `/inspect` and `/replay` can show the handoff chain
 - hidden agents are not user-selectable and are invoked internally by the runtime
 
 How hidden agents are used:
@@ -315,6 +320,10 @@ Custom agent persistence:
 - each file uses front matter plus a prompt body
 - startup merges built-in agents with all persisted custom agents
 - custom agents can then be selected with `--agent <name>` or `/agent <name>`
+- generated agents are sanitized before persistence:
+  - reserved names are avoided automatically
+  - duplicate identifiers are renamed safely
+  - read-only reviewer / analysis agents get restricted tool visibility instead of inheriting the full build toolset
 
 Real validation chain for the current agent system:
 
@@ -326,6 +335,11 @@ Real validation chain for the current agent system:
 - switched back to `build`
 - used `task` with `subagent_type=explore` to locate `active_agent` references in [`runtime.py`](/root/open-claude-code/src/openagent/agent/runtime.py)
 - confirmed `--status` reflects the persisted `active_agent` for the session
+- verified a single live session can:
+  - auto-switch from `build` to `plan` for a read-only architecture analysis request
+  - auto-switch back from `plan` to `build` for a file-creation request
+  - auto-delegate an exploration request to `explore`
+  - persist all handoffs as `agent` parts in the session log
 - externally verified that the refused `plan` turn did not create `work/should_not_exist.txt`
 
 - `text`: normal assistant text

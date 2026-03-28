@@ -22,6 +22,7 @@ ProfileLookup = Callable[[str], AgentProfile]
 
 @dataclass(slots=True)
 class SubagentResult:
+    agent_name: str
     summary: str
     history: list[Message]
     touched_paths: list[str]
@@ -95,6 +96,7 @@ class SubagentManager:
                 )
             )
         return SubagentResult(
+            agent_name=profile.name,
             summary=summary,
             history=history,
             touched_paths=touched_paths,
@@ -123,10 +125,12 @@ class SubagentManager:
 
 
 def format_subagent_report(result: SubagentResult) -> str:
+    agent_name = getattr(result, "agent_name", None) or "general"
     payload = {
         "status": "completed",
+        "agent": agent_name,
         "summary": result.summary,
-        "touched_paths": result.touched_paths,
-        "verified_paths": result.verified_paths,
+        "touched_paths": getattr(result, "touched_paths", []),
+        "verified_paths": getattr(result, "verified_paths", []),
     }
     return "<delegate_result>\n" + json.dumps(payload, ensure_ascii=False, indent=2) + "\n</delegate_result>"

@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from openagent.agent.profile import AgentProfile
 from openagent.agent.registry import build_agent_registry
 from openagent.agent.runtime import AgentRuntime
 from openagent.config.settings import Settings
@@ -89,3 +90,44 @@ def test_runtime_can_create_and_reload_custom_agent(tmp_path: Path):
     assert "ts-reviewer" in agents
     detail = runtime.show_agent("ts-reviewer")
     assert "TypeScript code review specialist" in detail
+
+
+def test_runtime_auto_switches_from_readonly_agent_to_build_for_write_requests(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+    readonly = AgentProfile(
+        name="readonly-reviewer",
+        description="Read-only reviewer",
+        mode="all",
+        native=False,
+        prompt="You are read-only.",
+        allowed_tools={"read_file", "grep"},
+        inherits_default_prompt=False,
+    )
+    runtime.agent_store.save(readonly)
+    runtime.agent_registry = build_agent_registry(runtime.settings, store=runtime.agent_store)
+    runtime.switch_agent("readonly-reviewer")
+
+    reply = runtime.run_turn("请创建一个文件 demo.txt，内容是 hello")
+
+    assert runtime.agent_profile.name == "build"
+    assert any(
+        message.agent == "session-op" and any(part.type == "agent" for part in message.parts)
+        for message in runtime.session.messages
+    )
+    assert "cannot verify" in reply or reply == "ok"
+
+
+def test_runtime_auto_delegates_explore_requests(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+
+    reply = runtime.run_turn("请定位 active_agent 的使用位置，并只返回函数名。")
+
+    assert reply == "ok"
+    assert any(
+        message.agent == "session-op" and any(part.type == "agent" for part in message.parts)
+        for message in runtime.session.messages
+    )
+    assert any(
+        message.agent == "explore" or any(part.type == "subtask" for part in message.parts)
+        for message in runtime.session.messages
+    )

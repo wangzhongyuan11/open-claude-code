@@ -30,6 +30,7 @@ class DelegateTool(BaseTool):
             title="Delegated subtask",
             metadata={
                 "agent": arguments.get("agent", "general"),
+                "subagent_agent": result.agent_name,
                 "message_count": len(result.history),
                 "touched_paths": result.touched_paths,
                 "verified_paths": result.verified_paths,

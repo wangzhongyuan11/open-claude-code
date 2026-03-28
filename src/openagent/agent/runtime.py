@@ -6,14 +6,16 @@ import time
 from typing import Any, Callable
 
 from openagent.agent.loop import AgentLoop
+from openagent.agent.generation import GeneratedAgentPayload, build_safe_profile_from_generated
 from openagent.agent.profile import AgentProfile
 from openagent.agent.prompts import PROMPT_BUILD, compose_agent_prompt
 from openagent.agent.registry import AgentRegistry, build_agent_registry
+from openagent.agent.routing import RoutingDecision, decide_routing
 from openagent.agent.store import AgentStore
 from openagent.agent.subagent import SubagentManager
 from openagent.config.settings import Settings
 from openagent.domain.events import Event
-from openagent.domain.messages import Message, MessageError, ModelRef, TokenUsage
+from openagent.domain.messages import Message, MessageError, ModelRef, Part, TokenUsage
 from openagent.domain.session import Session
 from openagent.domain.tools import ToolContext
 from openagent.events.bus import EventBus
@@ -126,6 +128,11 @@ class AgentRuntime:
         stream_handler: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
         self._refresh_session()
+        routing = decide_routing(self.agent_profile, user_text)
+        if routing.action == "switch" and routing.target_agent:
+            self._auto_switch_agent(routing)
+        if routing.action == "delegate" and routing.target_agent:
+            return self._auto_delegate_turn(user_text, routing)
         self._emit("message.added", {"role": "user", "session_id": self.session.id})
         self.session_manager.append_message(
             self.session,
@@ -282,13 +289,11 @@ class AgentRuntime:
         if not generated:
             raise RuntimeError("generate agent returned no content")
         payload = self._parse_generated_agent_payload(generated)
-        profile = AgentProfile(
-            name=payload["identifier"],
-            description=payload["whenToUse"],
-            mode="all",
-            native=False,
-            prompt=payload["systemPrompt"],
-            steps=10,
+        existing = {profile.name for profile in self.agent_registry.list(include_hidden=True)}
+        profile = build_safe_profile_from_generated(
+            payload,
+            existing_names=existing,
+            description_seed=description,
         )
         self.agent_store.save(profile)
         self.agent_registry = build_agent_registry(self.settings, store=self.agent_store)
@@ -503,7 +508,7 @@ class AgentRuntime:
             return fallback
 
     @staticmethod
-    def _parse_generated_agent_payload(text: str) -> dict[str, str]:
+    def _parse_generated_agent_payload(text: str) -> GeneratedAgentPayload:
         cleaned = text.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.strip("`")
@@ -513,11 +518,114 @@ class AgentRuntime:
         missing = required - payload.keys()
         if missing:
             raise RuntimeError(f"generated agent payload missing fields: {sorted(missing)}")
-        return {
-            "identifier": str(payload["identifier"]).strip(),
-            "whenToUse": str(payload["whenToUse"]).strip(),
-            "systemPrompt": str(payload["systemPrompt"]).strip(),
-        }
+        return GeneratedAgentPayload(
+            identifier=str(payload["identifier"]).strip(),
+            when_to_use=str(payload["whenToUse"]).strip(),
+            system_prompt=str(payload["systemPrompt"]).strip(),
+        )
+
+    def _auto_switch_agent(self, decision: RoutingDecision) -> None:
+        source = self.agent_profile.name
+        target = decision.target_agent or source
+        self.switch_agent(target)
+        self.session_manager.append_message(
+            self.session,
+            Message(
+                role="assistant",
+                agent="session-op",
+                content=f"[Agent Handoff] {source} -> {target} ({decision.reason})",
+                finish="stop",
+                parts=[
+                    Part(
+                        type="agent",
+                        content={
+                            "action": "switch",
+                            "source_agent": source,
+                            "target_agent": target,
+                            "reason": decision.reason,
+                        },
+                        state={"status": "completed"},
+                    )
+                ],
+            ),
+        )
+
+    def _auto_delegate_turn(self, user_text: str, decision: RoutingDecision) -> str:
+        self._refresh_session()
+        self._emit("message.added", {"role": "user", "session_id": self.session.id})
+        self.session_manager.append_message(
+            self.session,
+            Message(role="user", content=user_text),
+            mark_running_state=True,
+        )
+        target = decision.target_agent or "explore"
+        result = self.subagent_manager.run(user_text, agent_name=target)
+        handoff = Message(
+            role="assistant",
+            agent="session-op",
+            content=f"[Agent Handoff] {self.agent_profile.name} -> {target} ({decision.reason})",
+            finish="stop",
+            parts=[
+                Part(
+                    type="agent",
+                    content={
+                        "action": "delegate",
+                        "source_agent": self.agent_profile.name,
+                        "target_agent": target,
+                        "reason": decision.reason,
+                        "status": "completed",
+                    },
+                    state={"status": "completed"},
+                )
+            ],
+        )
+        reply = Message(
+            role="assistant",
+            agent=target,
+            content=result.summary,
+            finish="stop",
+            parts=[
+                Part(
+                    type="subtask",
+                    content={
+                        "agent": result.agent_name,
+                        "summary": result.summary,
+                        "touched_paths": result.touched_paths,
+                        "verified_paths": result.verified_paths,
+                    },
+                    state={"status": "completed"},
+                ),
+                Part(
+                    type="agent",
+                    content={
+                        "action": "return",
+                        "source_agent": target,
+                        "target_agent": self.agent_profile.name,
+                        "reason": "delegated-result",
+                    },
+                    state={"status": "completed"},
+                ),
+                Part(type="text", content=result.summary),
+            ],
+        )
+        self.session_manager.append_turn_messages(self.session, [handoff, reply])
+        self.session.metadata["last_finish_reason"] = "stop"
+        self.session.metadata["last_loop_unstable"] = "false"
+        self.session.metadata["last_loop_steps"] = "0"
+        self.session.metadata["last_loop_tool_calls"] = "0"
+        self.session.metadata["last_prompt_notes"] = "auto-delegate"
+        self.session.touch()
+        self.session_manager.store.save(self.session)
+        self._emit(
+            "agent.auto_delegate",
+            {
+                "session_id": self.session.id,
+                "source_agent": self.agent_profile.name,
+                "target_agent": target,
+                "reason": decision.reason,
+            },
+        )
+        return result.summary
 
     @staticmethod
     def _skill_roots() -> list[str]:

@@ -55,10 +55,20 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
     recent_snapshots: list[str] = []
     retry_notes: list[str] = []
     background_notes: list[str] = []
+    agent_notes: list[str] = []
     for message in messages[-6:]:
         if message.role == "assistant" and message.finish:
             recent_turns.append(f"assistant finish={message.finish}")
         for part in message.parts:
+            if part.type == "agent" and isinstance(part.content, dict):
+                source = part.content.get("source_agent")
+                target = part.content.get("target_agent")
+                action = part.content.get("action")
+                reason = part.content.get("reason")
+                line = f"{source} -> {target} ({action})"
+                if reason:
+                    line += f" reason={reason}"
+                agent_notes.append(line)
             if part.type == "tool" and isinstance(part.content, dict):
                 name = part.content.get("name")
                 path = part.content.get("arguments", {}).get("path")
@@ -95,7 +105,7 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
                 if summary:
                     line += f" summary={summary}"
                 background_notes.append(line)
-    if not tool_states and not recent_files and not recent_turns and not recent_patches and not recent_snapshots and not retry_notes and not background_notes:
+    if not tool_states and not recent_files and not recent_turns and not recent_patches and not recent_snapshots and not retry_notes and not background_notes and not agent_notes:
         return None
     lines = ["[Runtime Context]"]
     lines.append(
@@ -129,6 +139,9 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
     if background_notes:
         lines.append("Background tasks:")
         lines.extend(f"- {item}" for item in _dedupe(background_notes)[-6:])
+    if agent_notes:
+        lines.append("Agent handoffs:")
+        lines.extend(f"- {item}" for item in _dedupe(agent_notes)[-6:])
     text = "\n".join(lines)
     return Message(
         role="assistant",

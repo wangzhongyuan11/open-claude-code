@@ -103,14 +103,16 @@ class TaskTool(BaseTool):
                 "</task_result>",
             ]
         )
+        agent_name = getattr(result, "agent_name", None) or arguments.get("subagent_type") or "general"
         return ToolExecutionResult.success(
             output,
             title=title,
             metadata={
                 "task_id": task_id,
                 "subagent_type": arguments.get("subagent_type"),
-                "touched_paths": result.touched_paths,
-                "verified_paths": result.verified_paths,
+                "agent": agent_name,
+                "touched_paths": getattr(result, "touched_paths", []),
+                "verified_paths": getattr(result, "verified_paths", []),
             },
         )
 
