@@ -20,6 +20,7 @@ PartType = Literal[
     "compaction",
     "subtask",
     "retry",
+    "background-task",
 ]
 FinishReason = Literal["tool-calls", "stop", "length", "content-filter", "other"]
 

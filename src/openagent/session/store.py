@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from pathlib import Path
 
@@ -12,6 +13,8 @@ class SessionStore:
     def __init__(self, root_dir: Path) -> None:
         self.root_dir = root_dir.resolve()
         self.root_dir.mkdir(parents=True, exist_ok=True)
+        self._locks: dict[str, threading.RLock] = {}
+        self._locks_guard = threading.Lock()
 
     def create(self, workspace: Path, session_id: str | None = None) -> Session:
         session = Session(
@@ -26,17 +29,19 @@ class SessionStore:
         path = self._session_file(session_id)
         if not path.exists():
             raise FileNotFoundError(f"session not found: {session_id}")
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return self._deserialize(payload)
+        with self.lock(session_id):
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return self._deserialize(payload)
 
     def save(self, session: Session) -> None:
         session_dir = self.root_dir / session.id
         session_dir.mkdir(parents=True, exist_ok=True)
         path = self._session_file(session.id)
-        path.write_text(
-            json.dumps(self._serialize(session), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        tmp_path = path.with_suffix(".json.tmp")
+        payload = json.dumps(self._serialize(session), ensure_ascii=False, indent=2)
+        with self.lock(session.id):
+            tmp_path.write_text(payload, encoding="utf-8")
+            tmp_path.replace(path)
 
     def list_sessions(self) -> list[Session]:
         sessions: list[Session] = []
@@ -47,6 +52,26 @@ class SessionStore:
 
     def _session_file(self, session_id: str) -> Path:
         return self.root_dir / session_id / "session.json"
+
+    def session_dir(self, session_id: str) -> Path:
+        path = self.root_dir / session_id
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def lock(self, session_id: str) -> threading.RLock:
+        with self._locks_guard:
+            lock = self._locks.get(session_id)
+            if lock is None:
+                lock = threading.RLock()
+                self._locks[session_id] = lock
+            return lock
+
+    def update(self, session_id: str, updater) -> Session:
+        with self.lock(session_id):
+            session = self.load(session_id)
+            updater(session)
+            self.save(session)
+            return session
 
     @staticmethod
     def _new_id() -> str:

@@ -284,6 +284,28 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
   - session.json 中 todo 列表包含两条记录
   - `work/tool_runtime_chain/output` 最终存在且为目录
 
+## 14. Background Task Non-Blocking Validation
+
+使用同一个 session 连续执行下面 2 到 3 轮：
+
+1. 使用 `background_task` 启动后台命令，例如：
+   - `python -c "import time; time.sleep(2); print('bg-finished')"`
+   - 要求 agent 只返回 `task_id` 和当前状态
+2. 在同一个 session 的下一轮中，再让 agent 使用 `background_task get` 检查该任务
+3. 如有需要，再用 `background_task list` 或 `/inspect` 复核
+
+理论预期：
+
+- 启动后台任务的那一轮应立即返回，不等待命令执行完成
+- `.openagent/sessions/<session_id>/background_tasks.json` 中任务状态先为 `pending/running`，随后变为 `succeeded`、`failed` 或 `timed_out`
+- `.openagent/sessions/<session_id>/background_outputs/<task_id>.log` 中保留完整输出
+- session.json 中应追加带 `background-task` part 的 `session-op` 消息
+- 下一轮 prompt 中，agent 能读取到后台任务的：
+  - 状态
+  - 退出码
+  - 输出摘要
+  - 错误信息（若有）
+
 ## 13. 多步 Checklist 任务不应提前结束
 
 输入：

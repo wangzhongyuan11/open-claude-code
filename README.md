@@ -326,6 +326,7 @@ Current built-in local tools:
 - `patch`
 - `list_files`
 - `bash`
+- `background_task`
 - `delegate`
 - `task`
 - `todowrite`
@@ -351,6 +352,7 @@ The local coding toolchain now covers the common repository workflow:
 - insert text around an anchor
 - apply a unified diff patch
 - run shell commands when a shell-native action is really needed
+- run long-lived shell commands in the background without blocking the main dialogue loop
 
 Additional opencode-style integrations now available:
 
@@ -370,6 +372,18 @@ Additional opencode-style integrations now available:
   - executes multiple tool calls sequentially through the runtime and returns a structured summary
 - `webfetch` / `websearch`
   - fetch public web resources and perform lightweight web search with structured metadata
+- `background_task`
+  - starts, inspects, or lists long-running shell tasks without blocking the main conversation loop
+  - completion state, exit code, output summary, error, and output file path are persisted back into the session
+
+Background task runtime notes:
+
+- background work is executed by a detached worker process, not by an in-memory daemon thread
+- session writes are serialized through per-session store locks and atomic file replacement
+- task state is persisted in `.openagent/sessions/<session_id>/background_tasks.json`
+- full command output is persisted in `.openagent/sessions/<session_id>/background_outputs/<task_id>.log`
+- completion updates are appended back into session history as `session-op` messages carrying `background-task` parts
+- subsequent turns refresh the session from disk before prompt construction, so the model can see newly completed background work
 
 ## Manual Validation Tasks
 
@@ -416,6 +430,13 @@ Recent tool additions for editing precision and code understanding:
   - extracts a Python function/class definition using AST parsing and returns just that symbol body
 - `ensure_dir`
   - ensures a workspace directory exists and reports whether it had to be created
+
+Recent background execution addition:
+
+- `background_task`
+  - `action=start` launches a long-running shell command in a detached worker process
+  - `action=get` returns structured status for a specific task id
+  - `action=list` returns all persisted background tasks for the current session
 
 ## Work Log
 

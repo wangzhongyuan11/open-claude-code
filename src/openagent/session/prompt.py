@@ -54,6 +54,7 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
     recent_patches: list[str] = []
     recent_snapshots: list[str] = []
     retry_notes: list[str] = []
+    background_notes: list[str] = []
     for message in messages[-6:]:
         if message.role == "assistant" and message.finish:
             recent_turns.append(f"assistant finish={message.finish}")
@@ -82,7 +83,19 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
                     recent_snapshots.append(label)
             elif part.type == "retry" and isinstance(part.content, dict):
                 retry_notes.append(f"attempt={part.content.get('attempt')} delay_ms={part.content.get('delay_ms')}")
-    if not tool_states and not recent_files and not recent_turns and not recent_patches and not recent_snapshots and not retry_notes:
+            elif part.type == "background-task" and isinstance(part.content, dict):
+                task_id = part.content.get("task_id")
+                status = part.content.get("status")
+                title = part.content.get("title") or task_id
+                exit_code = part.content.get("exit_code")
+                summary = part.content.get("output_summary")
+                line = f"{title} ({task_id}) -> {status}"
+                if exit_code not in (None, ""):
+                    line += f" exit={exit_code}"
+                if summary:
+                    line += f" summary={summary}"
+                background_notes.append(line)
+    if not tool_states and not recent_files and not recent_turns and not recent_patches and not recent_snapshots and not retry_notes and not background_notes:
         return None
     lines = ["[Runtime Context]"]
     lines.append(
@@ -113,6 +126,9 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
     if retry_notes:
         lines.append("Retry notes:")
         lines.extend(f"- {item}" for item in _dedupe(retry_notes)[-4:])
+    if background_notes:
+        lines.append("Background tasks:")
+        lines.extend(f"- {item}" for item in _dedupe(background_notes)[-6:])
     text = "\n".join(lines)
     return Message(
         role="assistant",

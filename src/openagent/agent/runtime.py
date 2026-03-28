@@ -17,6 +17,7 @@ from openagent.events.logger import get_logger
 from openagent.providers.base import BaseProvider
 from openagent.providers.factory import build_provider
 from openagent.session.manager import SessionManager
+from openagent.session.background import BackgroundTaskManager
 from openagent.session.inspect import format_session_inspect, format_session_replay
 from openagent.session.status import status_payload
 from openagent.session.store import SessionStore
@@ -26,6 +27,7 @@ from openagent.session.task_validation import (
     validate_multistep_requirements,
 )
 from openagent.tools.builtin.bash import BashTool
+from openagent.tools.builtin.background import BackgroundTaskTool
 from openagent.tools.builtin.delegate import DelegateTool
 from openagent.tools.builtin.edit import EditFileTool, InsertTextTool, MultiEditTool, ReplaceAllTool
 from openagent.tools.builtin.files import AppendFileTool, EnsureDirTool, ListFilesTool, ReadFileTool, ReadFileRangeTool, WriteFileTool
@@ -93,6 +95,11 @@ class AgentRuntime:
         self.provider_factory = provider_factory or (lambda: self.provider)
         self.system_prompt = system_prompt
         self.question_handler: Callable[[list[dict[str, Any]]], list[str]] | None = None
+        self.background_tasks = BackgroundTaskManager(
+            store=self.session_manager.store,
+            workspace=self.workspace,
+            event_bus=self.event_bus,
+        )
         self.subagent_manager = self._build_subagent_manager()
         self.registry = self._build_registry()
         self.loop = AgentLoop(
@@ -113,6 +120,7 @@ class AgentRuntime:
         user_text: str,
         stream_handler: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
+        self._refresh_session()
         self._emit("message.added", {"role": "user", "session_id": self.session.id})
         self.session_manager.append_message(
             self.session,
@@ -176,6 +184,7 @@ class AgentRuntime:
         return self.session.id
 
     def status_report(self) -> str:
+        self._refresh_session()
         payload = {
             "session_id": self.session.id,
             "title": self.session.title,
@@ -196,9 +205,11 @@ class AgentRuntime:
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
     def inspect_session(self, limit: int = 12) -> str:
+        self._refresh_session()
         return format_session_inspect(self.session, limit=limit)
 
     def replay_session(self) -> str:
+        self._refresh_session()
         return format_session_replay(self.session)
 
     def compact_session(self) -> str:
@@ -252,6 +263,7 @@ class AgentRuntime:
         registry.register(ReadFileTool())
         registry.register(ReadFileRangeTool())
         registry.register(ReadTool())
+        registry.register(BackgroundTaskTool(self.background_tasks))
         registry.register(EnsureDirTool())
         registry.register(WriteFileTool())
         registry.register(WriteTool())
@@ -287,6 +299,7 @@ class AgentRuntime:
         registry.register(ReadFileTool())
         registry.register(ReadFileRangeTool())
         registry.register(ReadTool())
+        registry.register(BackgroundTaskTool(self.background_tasks))
         registry.register(EnsureDirTool())
         registry.register(WriteFileTool())
         registry.register(WriteTool())
@@ -317,6 +330,7 @@ class AgentRuntime:
         return {
             "mode": "runtime",
             "session": self.session,
+            "background_tasks": self.background_tasks,
             "get_todos": lambda: list(self.session.todos),
             "set_todos": self._set_todos,
             "invoke_tool": self._invoke_tool_from_runtime,
@@ -325,6 +339,11 @@ class AgentRuntime:
             "skill_roots": self._skill_roots(),
             "agent_name": agent_name,
         }
+
+    def _refresh_session(self) -> None:
+        self.session = self.session_manager.store.load(self.session.id)
+        self.loop.tool_context.session_id = self.session.id
+        self.loop.tool_context.runtime_state = self._tool_runtime_state(self.loop.tool_context.agent_name or "main")
 
     def _set_todos(self, todos: list) -> None:
         self.session.todos = todos
