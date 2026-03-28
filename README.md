@@ -92,11 +92,19 @@ openagent --workspace . --stream --prompt "请只回复 stream-ok。"
 
 Interactive commands:
 
+- `/help`
 - `/session`
-- `/status`
 - `/history`
+- `/status`
 - `/inspect`
 - `/replay`
+- `/compact`
+- `/revert`
+- `/retry`
+- `/todos`
+- `/todo add <text>`
+- `/todo done <index>`
+- `/todo clear`
 - `/end`
 - `/cancel`
 - `/exit`
@@ -107,6 +115,42 @@ Interactive input mode:
 - only `/end` submits the current message
 - `/cancel` discards the current buffered message
 - slash commands such as `/status` or `/inspect` must be entered on an empty buffer
+
+Interactive command reference:
+
+- `/help`
+  - prints the built-in REPL help text
+- `/session`
+  - prints the current session id
+- `/history`
+  - prints the persisted message history in stored order
+- `/status`
+  - prints the structured session/runtime status JSON
+- `/inspect`
+  - prints a structured JSON view of recent messages, parts, and metadata
+- `/replay`
+  - prints a human-readable turn-by-turn replay
+- `/compact`
+  - forces a compaction pass if the session can be summarized further
+- `/revert`
+  - removes the last user turn together with its assistant/tool results
+  - appends a `session-op` revert record so the change is auditable
+- `/retry`
+  - reruns the last user turn after recording retry metadata
+- `/todos`
+  - lists persisted todo items for the current session
+- `/todo add <text>`
+  - adds a todo item; use it to track planned follow-up work inside the session
+- `/todo done <index>`
+  - marks a todo item as completed using a 1-based index from `/todos`
+- `/todo clear`
+  - removes all todo items from the current session
+- `/cancel`
+  - discards the current multiline input buffer before submission
+- `/end`
+  - submits the current multiline input buffer as one user message
+- `/exit`
+  - exits the REPL
 
 ## Minimal Demo
 

@@ -25,12 +25,12 @@ def test_repl_reader_collects_multiline_until_end(monkeypatch):
 
 
 def test_repl_reader_executes_command_only_when_buffer_empty(monkeypatch):
-    inputs = iter(["/status"])
+    inputs = iter(["/help"])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
     item = _read_repl_input()
 
-    assert item == ("command", "/status")
+    assert item == ("command", "/help")
 
 
 def test_repl_reader_cancel_discards_buffer(monkeypatch):

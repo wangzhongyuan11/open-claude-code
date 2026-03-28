@@ -9,6 +9,7 @@ from openagent.config.env import load_dotenv
 from openagent.session.todo import render_todos
 
 SHELL_COMMANDS = {
+    "/help",
     "/session",
     "/history",
     "/status",
@@ -19,6 +20,24 @@ SHELL_COMMANDS = {
     "/retry",
     "/todos",
 }
+
+HELP_TEXT = """Available interactive commands:
+/help                     Show this help text
+/session                  Print the current session id
+/history                  Print persisted message history
+/status                   Print structured session/runtime status
+/inspect                  Print a structured JSON inspect view
+/replay                   Print a turn-by-turn replay view
+/compact                  Force a compaction pass if needed
+/revert                   Remove the last user turn and its assistant/tool results
+/retry                    Re-run the last user turn
+/todos                    List current persisted todos
+/todo add <text>          Add a todo item (priority defaults to medium)
+/todo done <index>        Mark a todo as completed (1-based index)
+/todo clear               Remove all todo items
+/cancel                   Discard the current multiline input buffer
+/end                      Submit the current multiline input buffer
+/exit                     Exit the REPL"""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -141,6 +160,9 @@ def main() -> None:
         item_type, user_input = item
         if user_input in {"/exit", "exit", "quit"}:
             break
+        if item_type == "command" and user_input == "/help":
+            print(HELP_TEXT)
+            continue
         if item_type == "command" and user_input == "/session":
             print(runtime.session_id)
             continue
