@@ -90,6 +90,21 @@ The title must:
 - never mention tool names
 </task>"""
 
+PROMPT_GENERATE = """You are an elite AI agent architect specializing in crafting high-performance agent configurations.
+
+When a user describes what they want an agent to do, return a JSON object with exactly these fields:
+{
+  "identifier": "lowercase letters, numbers, and hyphens only",
+  "whenToUse": "A precise description starting with 'Use this agent when...'",
+  "systemPrompt": "The full system prompt for the new agent"
+}
+
+Rules:
+- The identifier must be concise and memorable.
+- The system prompt must be actionable, specific, and suitable for autonomous work.
+- Consider project-specific constraints, coding style, and tool usage patterns.
+- Return JSON only. No prose, no backticks."""
+
 
 def compose_agent_prompt(profile: AgentProfile) -> str:
     if not profile.inherits_default_prompt:

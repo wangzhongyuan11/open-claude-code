@@ -6,13 +6,25 @@ from openagent.cli.main import _read_repl_input, build_parser
 def test_cli_parser_accepts_prompt_and_print_session():
     parser = build_parser()
 
-    args: Namespace = parser.parse_args(["--workspace", ".", "--print-session", "--status", "--prompt", "hello", "--stream"])
+    args: Namespace = parser.parse_args(
+        ["--workspace", ".", "--print-session", "--status", "--prompt", "hello", "--stream", "--agent", "plan"]
+    )
 
     assert args.workspace == "."
     assert args.print_session is True
     assert args.status is True
     assert args.prompt == "hello"
     assert args.stream is True
+    assert args.agent == "plan"
+
+
+def test_cli_parser_accepts_agent_create_and_show():
+    parser = build_parser()
+
+    args: Namespace = parser.parse_args(["--agent-create", "TypeScript reviewer", "--agent-show", "build"])
+
+    assert args.agent_create == "TypeScript reviewer"
+    assert args.agent_show == "build"
 
 
 def test_repl_reader_collects_multiline_until_end(monkeypatch):

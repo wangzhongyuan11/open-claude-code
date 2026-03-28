@@ -18,6 +18,10 @@ class HiddenAwareProvider(BaseProvider):
             return AgentResponse(text="Compact summary text")
         if "pull request description" in prompt:
             return AgentResponse(text="I added an agent registry and hidden agent prompts.")
+        if "elite AI agent architect" in prompt:
+            return AgentResponse(
+                text='{"identifier":"ts-reviewer","whenToUse":"Use this agent when reviewing TypeScript code changes.","systemPrompt":"You are a TypeScript code review specialist."}'
+            )
         return AgentResponse(text="ok")
 
 
@@ -61,6 +65,7 @@ def test_runtime_can_switch_to_plan_agent_and_filter_tools(tmp_path: Path):
     visible_tools = set(runtime.registry.ids())
     assert "write_file" not in visible_tools
     assert "edit_file" not in visible_tools
+    assert "bash" not in visible_tools
     assert "read_file" in visible_tools
     assert "grep" in visible_tools
 
@@ -74,3 +79,13 @@ def test_hidden_title_and_compaction_agents_feed_session_state(tmp_path: Path):
     assert runtime.session.summary is not None
     assert runtime.session.summary.text == "Compact summary text"
     assert "I added an agent registry" in runtime.conversation_summary()
+
+
+def test_runtime_can_create_and_reload_custom_agent(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+    message = runtime.create_agent("TypeScript 代码审查专家")
+    assert "ts-reviewer" in message
+    agents = runtime.list_agents()
+    assert "ts-reviewer" in agents
+    detail = runtime.show_agent("ts-reviewer")
+    assert "TypeScript code review specialist" in detail

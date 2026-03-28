@@ -9,6 +9,7 @@ from openagent.agent.loop import AgentLoop
 from openagent.agent.profile import AgentProfile
 from openagent.agent.prompts import PROMPT_BUILD, compose_agent_prompt
 from openagent.agent.registry import AgentRegistry, build_agent_registry
+from openagent.agent.store import AgentStore
 from openagent.agent.subagent import SubagentManager
 from openagent.config.settings import Settings
 from openagent.domain.events import Event
@@ -81,7 +82,8 @@ class AgentRuntime:
         self.session = session
         self.settings = settings
         self.event_bus = event_bus
-        self.agent_registry = agent_registry or build_agent_registry(settings)
+        self.agent_store = AgentStore(settings.agent_root)
+        self.agent_registry = agent_registry or build_agent_registry(settings, store=self.agent_store)
         requested_agent = agent_name or session.metadata.get("active_agent") or self.agent_registry.default_primary().name
         self.agent_profile = self.agent_registry.get(requested_agent)
         self.hidden_agents_enabled = provider_factory is not None
@@ -230,6 +232,26 @@ class AgentRuntime:
         ]
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
+    def show_agent(self, name: str) -> str:
+        profile = self.agent_registry.get(name)
+        payload = {
+            "name": profile.name,
+            "description": profile.description,
+            "mode": profile.mode,
+            "hidden": profile.hidden,
+            "native": profile.native,
+            "steps": profile.steps,
+            "inherits_default_prompt": profile.inherits_default_prompt,
+            "allowed_tools": sorted(profile.allowed_tools) if profile.allowed_tools is not None else None,
+            "prompt": profile.prompt,
+        }
+        if profile.model is not None:
+            payload["model"] = {
+                "provider_id": profile.model.provider_id,
+                "model_id": profile.model.model_id,
+            }
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
     def switch_agent(self, name: str) -> str:
         profile = self.agent_registry.get(name)
         if not profile.supports_primary():
@@ -253,6 +275,24 @@ class AgentRuntime:
             event_bus=self.event_bus,
         )
         return f"Switched active agent to `{profile.name}`."
+
+    def create_agent(self, description: str) -> str:
+        prompt = f'Create an agent configuration based on this request: "{description}"'
+        generated = self._hidden_generate_text("generate", prompt)
+        if not generated:
+            raise RuntimeError("generate agent returned no content")
+        payload = self._parse_generated_agent_payload(generated)
+        profile = AgentProfile(
+            name=payload["identifier"],
+            description=payload["whenToUse"],
+            mode="all",
+            native=False,
+            prompt=payload["systemPrompt"],
+            steps=10,
+        )
+        self.agent_store.save(profile)
+        self.agent_registry = build_agent_registry(self.settings, store=self.agent_store)
+        return f"Created agent `{profile.name}`."
 
     def conversation_summary(self) -> str:
         self._refresh_session()
@@ -463,6 +503,23 @@ class AgentRuntime:
             return fallback
 
     @staticmethod
+    def _parse_generated_agent_payload(text: str) -> dict[str, str]:
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.strip("`")
+            cleaned = cleaned.replace("json\n", "", 1)
+        payload = json.loads(cleaned)
+        required = {"identifier", "whenToUse", "systemPrompt"}
+        missing = required - payload.keys()
+        if missing:
+            raise RuntimeError(f"generated agent payload missing fields: {sorted(missing)}")
+        return {
+            "identifier": str(payload["identifier"]).strip(),
+            "whenToUse": str(payload["whenToUse"]).strip(),
+            "systemPrompt": str(payload["systemPrompt"]).strip(),
+        }
+
+    @staticmethod
     def _skill_roots() -> list[str]:
         roots = ["/root/.codex/skills", str((Path.cwd() / ".codex" / "skills").resolve())]
         seen: list[str] = []
@@ -573,7 +630,8 @@ def build_default_runtime(
     manager = build_session_manager(workspace=workspace_path, session_root=session_root or settings.session_root)
     session = manager.start(workspace=workspace_path, session_id=session_id)
     event_bus = EventBus(settings.log_root / f"{session.id}.jsonl")
-    agent_registry = build_agent_registry(settings)
+    agent_store = AgentStore(settings.agent_root)
+    agent_registry = build_agent_registry(settings, store=agent_store)
 
     def provider_factory(profile: AgentProfile | str | None = None) -> BaseProvider:
         if isinstance(profile, str):

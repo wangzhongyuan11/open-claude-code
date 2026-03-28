@@ -10,6 +10,7 @@ class Settings:
     workspace: Path
     session_root: Path
     log_root: Path
+    agent_root: Path
     provider_name: str = "anthropic"
     model: str = "claude-3-7-sonnet-latest"
     default_agent: str = "build"
@@ -42,6 +43,7 @@ class Settings:
             workspace=workspace_path,
             session_root=state_root / "sessions",
             log_root=state_root / "logs",
+            agent_root=state_root / "agents",
             provider_name=provider_name,
             model=model,
             default_agent=default_agent,

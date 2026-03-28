@@ -6,11 +6,13 @@ from openagent.agent.profile import AgentProfile
 from openagent.agent.prompts import (
     PROMPT_COMPACTION,
     PROMPT_EXPLORE,
+    PROMPT_GENERATE,
     PROMPT_GENERAL,
     PROMPT_PLAN,
     PROMPT_SUMMARY,
     PROMPT_TITLE,
 )
+from openagent.agent.store import AgentStore
 from openagent.config.settings import Settings
 
 
@@ -50,7 +52,7 @@ class AgentRegistry:
         return [profile.name for profile in self.list(include_hidden=True) if profile.hidden]
 
 
-def build_agent_registry(settings: Settings) -> AgentRegistry:
+def build_agent_registry(settings: Settings, store: AgentStore | None = None) -> AgentRegistry:
     readonly_tools = {
         "read_file",
         "read_file_range",
@@ -69,7 +71,6 @@ def build_agent_registry(settings: Settings) -> AgentRegistry:
         "question",
         "batch",
         "background_task",
-        "bash",
     }
     plan_tools = readonly_tools | {"todowrite"}
 
@@ -133,6 +134,16 @@ def build_agent_registry(settings: Settings) -> AgentRegistry:
             allowed_tools=set(),
             steps=1,
         ),
+        "generate": AgentProfile(
+            name="generate",
+            description="Hidden agent that generates custom agent definitions from natural language descriptions.",
+            mode="primary",
+            hidden=True,
+            prompt=PROMPT_GENERATE,
+            inherits_default_prompt=False,
+            allowed_tools=set(),
+            steps=1,
+        ),
     }
 
     default_agent = settings.default_agent or "build"
@@ -142,4 +153,7 @@ def build_agent_registry(settings: Settings) -> AgentRegistry:
     # Reserve a hook for future user-defined agent overrides.
     for name, profile in list(profiles.items()):
         profiles[name] = replace(profile)
+    agent_store = store or AgentStore(settings.agent_root)
+    for custom in agent_store.load_all():
+        profiles[custom.name] = custom
     return AgentRegistry(profiles=profiles, default_agent=default_agent)

@@ -84,6 +84,8 @@ openagent --workspace . --list-sessions
 openagent --workspace . --session-id <session_id>
 openagent --workspace . --agents
 openagent --workspace . --agent plan
+openagent --workspace . --agent-create "TypeScript 代码审查专家"
+openagent --workspace . --agent-show ts-reviewer
 openagent --workspace . --print-session
 openagent --workspace . --session-id <session_id> --status
 openagent --workspace . --session-id <session_id> --summary
@@ -111,6 +113,8 @@ Interactive commands:
 - `/todo done <index>`
 - `/todo clear`
 - `/agent <name>`
+- `/agent show <name>`
+- `/agent create <desc>`
 - `/end`
 - `/cancel`
 - `/exit`
@@ -157,6 +161,10 @@ Interactive command reference:
   - removes all todo items from the current session
 - `/agent <name>`
   - switches the active primary agent for the current session, for example `build` or `plan`
+- `/agent show <name>`
+  - prints the stored definition for a built-in or custom agent
+- `/agent create <description>`
+  - invokes the hidden generate agent, persists the result under `.openagent/agents/`, and reloads the registry
 - `/cancel`
   - discards the current multiline input buffer before submission
 - `/end`
@@ -282,12 +290,16 @@ Built-in agents:
   - hidden agent used to generate a PR-style conversation summary
 - `compaction`
   - hidden agent used to generate compaction summaries for long sessions
+- `generate`
+  - hidden agent used to generate custom agent definitions from natural language descriptions
 
 How agent selection works:
 
 - the active primary agent is stored in `session.metadata["active_agent"]`
 - `--agent <name>` starts a runtime with that primary agent
 - `/agent <name>` switches the active primary agent inside the current session
+- `--agent-create <description>` and `/agent create <description>` generate and persist a custom agent
+- `--agent-show <name>` and `/agent show <name>` inspect a built-in or persisted custom agent
 - hidden agents are not user-selectable and are invoked internally by the runtime
 
 How hidden agents are used:
@@ -295,15 +307,26 @@ How hidden agents are used:
 - the first user turn can trigger the hidden `title` agent to create a better session title
 - compaction can call the hidden `compaction` agent before falling back to deterministic summarization
 - `/summary` invokes the hidden `summary` agent before falling back to the local summary implementation
+- agent creation invokes the hidden `generate` agent and persists the generated profile as markdown
+
+Custom agent persistence:
+
+- generated agents are stored under `.openagent/agents/<name>.md`
+- each file uses front matter plus a prompt body
+- startup merges built-in agents with all persisted custom agents
+- custom agents can then be selected with `--agent <name>` or `/agent <name>`
 
 Real validation chain for the current agent system:
 
 - listed visible agents with `/agents`
+- created and persisted a custom `ts-reviewer` agent through the live CLI
+- switched to `ts-reviewer` in the same session and verified it responded under the custom review prompt
 - ran a `build` turn and confirmed normal tool-capable behavior
 - switched to `plan` and confirmed the agent refused a requested file creation instead of editing the workspace
 - switched back to `build`
 - used `task` with `subagent_type=explore` to locate `active_agent` references in [`runtime.py`](/root/open-claude-code/src/openagent/agent/runtime.py)
 - confirmed `--status` reflects the persisted `active_agent` for the session
+- externally verified that the refused `plan` turn did not create `work/should_not_exist.txt`
 
 - `text`: normal assistant text
 - `reasoning`: internal reasoning notes when present

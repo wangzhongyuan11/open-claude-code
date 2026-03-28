@@ -40,6 +40,8 @@ HELP_TEXT = """Available interactive commands:
 /todo done <index>        Mark a todo as completed (1-based index)
 /todo clear               Remove all todo items
 /agent <name>             Switch the active primary agent
+/agent show <name>        Show a stored agent definition
+/agent create <desc>      Generate and persist a custom agent
 /cancel                   Discard the current multiline input buffer
 /end                      Submit the current multiline input buffer
 /exit                     Exit the REPL"""
@@ -51,6 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--session-id", default=None, help="Resume an existing session")
     parser.add_argument("--agent", default=None, help="Select the active primary agent")
     parser.add_argument("--agents", action="store_true", help="List visible agents and exit")
+    parser.add_argument("--agent-show", default=None, help="Show a specific agent definition and exit")
+    parser.add_argument("--agent-create", default=None, help="Generate and persist a custom agent, then exit")
     parser.add_argument("--list-sessions", action="store_true", help="List local sessions and exit")
     parser.add_argument("--print-session", action="store_true", help="Print the current session id and exit")
     parser.add_argument("--status", action="store_true", help="Print session status and exit")
@@ -170,6 +174,14 @@ def main() -> None:
         print(runtime.list_agents())
         return
 
+    if args.agent_show:
+        print(runtime.show_agent(args.agent_show))
+        return
+
+    if args.agent_create:
+        print(runtime.create_agent(args.agent_create))
+        return
+
     if args.summary:
         print(runtime.conversation_summary())
         return
@@ -252,7 +264,13 @@ def main() -> None:
             if len(parts) == 2:
                 print(runtime.switch_agent(parts[1]))
                 continue
-            print("Usage: /agent <name>")
+            if len(parts) >= 3 and parts[1] == "show":
+                print(runtime.show_agent(parts[2]))
+                continue
+            if len(parts) >= 3 and parts[1] == "create":
+                print(runtime.create_agent(" ".join(parts[2:])))
+                continue
+            print("Usage: /agent <name> | /agent show <name> | /agent create <description>")
             continue
         try:
             if args.stream:
