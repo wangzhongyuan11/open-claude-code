@@ -5,7 +5,7 @@ from openagent.domain.messages import Message
 from openagent.domain.session import SessionTodo
 from openagent.domain.tools import ToolContext, ToolExecutionResult
 from openagent.tools.builtin.aliases import EditTool, PatchTool, ReadTool, TaskTool, TodoReadTool, TodoWriteTool, WriteTool
-from openagent.tools.builtin.integration import BatchTool, CodeSearchTool, LspTool, QuestionTool, SkillTool
+from openagent.tools.builtin.integration import BatchTool, CodeSearchTool, LspTool, QuestionTool, ReadSymbolTool, SkillTool
 from openagent.tools.builtin.web import WebFetchTool, WebSearchTool
 
 
@@ -122,6 +122,18 @@ def test_lsp_python_fallback_and_codesearch(tmp_path: Path):
     assert not lsp_result.is_error
     assert "add" in lsp_result.content
     assert "mod.py:2:     return a + b" in code_result.content
+
+
+def test_read_symbol_tool(tmp_path: Path):
+    file_path = tmp_path / "mod.py"
+    file_path.write_text("class Box:\n    pass\n\ndef add(a, b):\n    return a + b\n", encoding="utf-8")
+    context = ToolContext(workspace=tmp_path)
+
+    result = ReadSymbolTool().invoke({"path": "mod.py", "symbol": "add"}, context)
+
+    assert not result.is_error
+    assert "def add(a, b):" in result.content
+    assert "return a + b" in result.content
 
 
 def test_batch_tool_uses_runtime_invoke_callback(tmp_path: Path):

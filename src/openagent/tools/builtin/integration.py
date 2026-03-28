@@ -214,6 +214,70 @@ class CodeSearchTool(BaseTool):
         )
 
 
+class ReadSymbolTool(BaseTool):
+    tool_id = "read_symbol"
+    name = "read_symbol"
+    description = "Read a named Python function or class definition from a file."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "symbol": {"type": "string"},
+        },
+        "required": ["path", "symbol"],
+    }
+
+    def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
+        path = (context.workspace / arguments["path"]).resolve()
+        if not path.exists():
+            return ToolExecutionResult.failure(
+                f"file not found: {arguments['path']}",
+                error_type="path_not_found",
+                metadata={"operation": "read_symbol", "path": arguments["path"]},
+            )
+        if path.suffix != ".py":
+            return ToolExecutionResult.failure(
+                "read_symbol currently supports Python files only.",
+                error_type="unsupported_filetype",
+                hint="Use a Python file path or fall back to read_file/read_file_range.",
+                metadata={"operation": "read_symbol", "path": arguments["path"]},
+            )
+        source = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(source)
+        except SyntaxError as exc:
+            return ToolExecutionResult.failure(
+                f"failed to parse Python file: {exc}",
+                error_type="syntax_error",
+                metadata={"operation": "read_symbol", "path": arguments["path"]},
+            )
+        symbol = arguments["symbol"]
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == symbol:
+                segment = ast.get_source_segment(source, node) or ""
+                if not segment:
+                    lines = source.splitlines()
+                    end_lineno = getattr(node, "end_lineno", node.lineno)
+                    segment = "\n".join(lines[node.lineno - 1 : end_lineno])
+                return ToolExecutionResult.success(
+                    segment,
+                    title=f"Read symbol {symbol} from {arguments['path']}",
+                    metadata={
+                        "operation": "read_symbol",
+                        "path": arguments["path"],
+                        "symbol": symbol,
+                        "line": str(node.lineno),
+                    },
+                    artifacts=[ToolArtifact(kind="file", path=str(path), description=f"Symbol {symbol}")],
+                )
+        return ToolExecutionResult.failure(
+            f"symbol not found: {symbol}",
+            error_type="symbol_not_found",
+            hint="Use codesearch or lsp workspaceSymbol/documentSymbol to locate the symbol first.",
+            metadata={"operation": "read_symbol", "path": arguments["path"], "symbol": symbol},
+        )
+
+
 class BatchTool(BaseTool):
     tool_id = "batch"
     name = "batch"

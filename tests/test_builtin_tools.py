@@ -2,7 +2,7 @@ from pathlib import Path
 
 from openagent.domain.tools import ToolContext
 from openagent.tools.builtin.bash import BashTool
-from openagent.tools.builtin.edit import EditFileTool, MultiEditTool
+from openagent.tools.builtin.edit import EditFileTool, InsertTextTool, MultiEditTool, ReplaceAllTool
 from openagent.tools.builtin.files import AppendFileTool, ListFilesTool, ReadFileRangeTool, ReadFileTool, WriteFileTool
 from openagent.tools.builtin.patch import ApplyPatchTool
 from openagent.tools.builtin.search import GlobTool, GrepTool, LsTool
@@ -149,3 +149,26 @@ def test_multiedit_tool(tmp_path: Path):
 
     assert not result.is_error
     assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "alpha-1\nbeta\ngamma-1\n"
+
+
+def test_replace_all_tool(tmp_path: Path):
+    context = ToolContext(workspace=tmp_path)
+    (tmp_path / "a.txt").write_text("x=1\nx=1\n", encoding="utf-8")
+
+    result = ReplaceAllTool().invoke({"path": "a.txt", "old_text": "x=1", "new_text": "x=2"}, context)
+
+    assert not result.is_error
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "x=2\nx=2\n"
+
+
+def test_insert_text_tool(tmp_path: Path):
+    context = ToolContext(workspace=tmp_path)
+    (tmp_path / "a.txt").write_text("alpha\nbeta\n", encoding="utf-8")
+
+    result = InsertTextTool().invoke(
+        {"path": "a.txt", "anchor_text": "alpha\n", "new_text": "inserted\n", "position": "after"},
+        context,
+    )
+
+    assert not result.is_error
+    assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "alpha\ninserted\nbeta\n"

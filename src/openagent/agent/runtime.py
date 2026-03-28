@@ -27,9 +27,9 @@ from openagent.session.task_validation import (
 )
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.delegate import DelegateTool
-from openagent.tools.builtin.edit import EditFileTool, MultiEditTool
+from openagent.tools.builtin.edit import EditFileTool, InsertTextTool, MultiEditTool, ReplaceAllTool
 from openagent.tools.builtin.files import AppendFileTool, ListFilesTool, ReadFileTool, ReadFileRangeTool, WriteFileTool
-from openagent.tools.builtin.integration import BatchTool, CodeSearchTool, LspTool, QuestionTool, SkillTool
+from openagent.tools.builtin.integration import BatchTool, CodeSearchTool, LspTool, QuestionTool, ReadSymbolTool, SkillTool
 from openagent.tools.builtin.patch import ApplyPatchTool
 from openagent.tools.builtin.aliases import EditTool, PatchTool, ReadTool, TaskTool, TodoReadTool, TodoWriteTool, WriteTool
 from openagent.tools.builtin.search import GlobTool, GrepTool, LsTool
@@ -40,12 +40,12 @@ from openagent.tools.registry import ToolRegistry
 DEFAULT_SYSTEM_PROMPT = """You are a Python coding agent working in a local repository.
 Use tools when needed.
 Prefer reading files before editing them.
-Prefer dedicated tools (`ls`, `glob`, `grep`, `read_file`, `read_file_range`, `write_file`, `append_file`, `edit_file`, `apply_patch`) over `bash` whenever they are sufficient for the task.
+Prefer dedicated tools (`ls`, `glob`, `grep`, `codesearch`, `read_file`, `read_file_range`, `read_symbol`, `write_file`, `append_file`, `edit_file`, `replace_all`, `insert_text`, `apply_patch`) over `bash` whenever they are sufficient for the task.
 You also have opencode-style aliases (`read`, `write`, `edit`, `patch`, `task`, `todowrite`, `todoread`, `question`, `skill`, `lsp`, `codesearch`, `batch`, `webfetch`, `websearch`) that should be used deliberately when they better match the user's request.
-For plain workspace file reads, use `read_file` or `read_file_range` instead of `bash`.
+For plain workspace file reads, use `read_file`, `read_file_range`, or `read_symbol` instead of `bash`.
 For directory inspection, use `ls` or `glob` instead of `bash`.
 For repository text search, use `grep` instead of `bash`.
-Reserve `bash` for shell-native tasks such as running commands, not for ordinary file reads, file searches, or simple file edits when a dedicated tool exists.
+Reserve `bash` for shell-native tasks such as running commands, not for ordinary file reads, code searches, or simple file edits when a dedicated tool exists.
 Keep changes precise and minimal.
 If the user asks you to read, create, edit, append, list, inspect, or execute something in the workspace, you must use the appropriate tool rather than claiming success from reasoning alone.
 Never claim a file was created, edited, appended, or read unless you actually obtained a tool result that proves it.
@@ -255,6 +255,8 @@ class AgentRuntime:
         registry.register(WriteTool())
         registry.register(AppendFileTool())
         registry.register(EditFileTool())
+        registry.register(ReplaceAllTool())
+        registry.register(InsertTextTool())
         registry.register(EditTool())
         registry.register(MultiEditTool())
         registry.register(ApplyPatchTool())
@@ -264,6 +266,7 @@ class AgentRuntime:
         registry.register(GlobTool())
         registry.register(GrepTool())
         registry.register(CodeSearchTool())
+        registry.register(ReadSymbolTool())
         registry.register(WebFetchTool())
         registry.register(WebSearchTool())
         registry.register(QuestionTool())
@@ -286,6 +289,8 @@ class AgentRuntime:
         registry.register(WriteTool())
         registry.register(AppendFileTool())
         registry.register(EditFileTool())
+        registry.register(ReplaceAllTool())
+        registry.register(InsertTextTool())
         registry.register(EditTool())
         registry.register(MultiEditTool())
         registry.register(ApplyPatchTool())
@@ -295,6 +300,7 @@ class AgentRuntime:
         registry.register(GlobTool())
         registry.register(GrepTool())
         registry.register(CodeSearchTool())
+        registry.register(ReadSymbolTool())
         registry.register(WebFetchTool())
         registry.register(WebSearchTool())
         registry.register(SkillTool())

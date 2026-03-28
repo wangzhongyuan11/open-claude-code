@@ -26,7 +26,7 @@ def detect_completion(
     if tool_name in {"delegate", "task"}:
         return _delegate_completion(user_text, content)
 
-    if tool_name in {"read_file", "read"}:
+    if tool_name in {"read_file", "read", "read_symbol"}:
         decision = _read_completion(user_text, content)
         if decision:
             return decision
@@ -37,7 +37,7 @@ def detect_completion(
         if decision:
             return decision
 
-    if tool_name in {"write_file", "append_file", "edit_file", "write", "edit", "apply_patch", "patch", "multiedit"}:
+    if tool_name in {"write_file", "append_file", "edit_file", "write", "edit", "apply_patch", "patch", "multiedit", "replace_all", "insert_text"}:
         decision = _write_or_edit_completion(user_text, tool_name, arguments, metadata)
         if decision:
             return decision
@@ -96,7 +96,7 @@ def _write_or_edit_completion(
             return TerminationDecision(True, f"已完成，已写入 {path}。", "write-satisfied")
 
     replace_pair = _extract_replace_pair(user_text)
-    if tool_name in {"edit_file", "edit", "apply_patch", "patch", "multiedit"} and replace_pair is not None:
+    if tool_name in {"edit_file", "edit", "apply_patch", "patch", "multiedit", "replace_all", "insert_text"} and replace_pair is not None:
         old_text, new_text = replace_pair
         before_content = metadata.get("before_content")
         if isinstance(before_content, str):

@@ -319,6 +319,8 @@ Current built-in local tools:
 - `edit_file`
 - `edit`
 - `multiedit`
+- `replace_all`
+- `insert_text`
 - `apply_patch`
 - `patch`
 - `list_files`
@@ -330,6 +332,7 @@ Current built-in local tools:
 - `question`
 - `skill`
 - `lsp`
+- `read_symbol`
 - `batch`
 - `webfetch`
 - `websearch`
@@ -340,7 +343,10 @@ The local coding toolchain now covers the common repository workflow:
 - find files by pattern
 - search code/text
 - read exact files or line ranges
+- read a named Python symbol directly
 - write/append/edit files
+- replace all exact occurrences
+- insert text around an anchor
 - apply a unified diff patch
 - run shell commands when a shell-native action is really needed
 
@@ -356,6 +362,8 @@ Additional opencode-style integrations now available:
   - loads a `SKILL.md` from configured skill roots and injects it as structured context
 - `lsp`
   - provides AST-based Python fallback navigation plus a hook for an external LSP handler
+- `read_symbol`
+  - reads a named Python function or class definition from a file without loading the whole file
 - `batch`
   - executes multiple tool calls sequentially through the runtime and returns a structured summary
 - `webfetch` / `websearch`
@@ -395,6 +403,15 @@ Observed real-world recovery cases during validation:
 - the CLI originally crashed because `AgentLoop` did not expose its `tool_context`; fixed by retaining `tool_context` on the loop object so runtime callbacks such as `question` can be injected safely
 - `grep` originally failed when the model supplied an absolute `path_glob` inside the workspace; fixed by normalizing workspace-absolute globs before matching
 - `read_file_range` originally rejected `start_line=0`; fixed by clamping the start line to 1 so the processor can recover from zero-based line guesses more gracefully
+
+Recent tool additions for editing precision and code understanding:
+
+- `replace_all`
+  - replaces every exact occurrence of a string and returns structured mutation metadata
+- `insert_text`
+  - inserts text before or after an exact anchor string with full before/after snapshots
+- `read_symbol`
+  - extracts a Python function/class definition using AST parsing and returns just that symbol body
 
 ## Work Log
 
