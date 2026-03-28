@@ -11,6 +11,7 @@ from openagent.events.bus import EventBus
 from openagent.providers.base import BaseProvider
 from openagent.session.llm import LLMRequest, SessionLLM
 from openagent.session.message_builder import AssistantMessageBuilder, ToolMessageBuilder
+from openagent.session.termination import detect_completion
 from openagent.tools.registry import ToolRegistry
 
 
@@ -53,6 +54,7 @@ class SessionProcessor:
 
         for _ in range(max_steps):
             step_count += 1
+            last_user_text = self._last_user_text(history)
             response, assistant_message = self._stream_assistant_message(
                 messages=history,
                 system_prompt=system_prompt,
@@ -98,6 +100,23 @@ class SessionProcessor:
                     )
                 )
                 last_tool_result = (tool_call.name, result.content)
+                decision = detect_completion(
+                    user_text=last_user_text,
+                    tool_name=tool_call.name,
+                    arguments=tool_call.arguments,
+                    content=result.content,
+                    metadata=result.metadata,
+                )
+                if decision is not None:
+                    history.append(Message(role="assistant", content=decision.reply, finish="stop"))
+                    self._emit("loop.completed", {"termination_reason": decision.reason})
+                    return ProcessorResult(
+                        history=history,
+                        finish_reason="stop",
+                        unstable=False,
+                        step_count=step_count,
+                        tool_call_count=tool_call_count,
+                    )
                 call_key = self._call_fingerprint(tool_call.name, tool_call.arguments)
                 repeated_calls[call_key] = repeated_calls.get(call_key, 0) + 1
                 if repeated_calls[call_key] >= 3:
@@ -131,6 +150,13 @@ class SessionProcessor:
     @staticmethod
     def _call_fingerprint(name: str, arguments: dict) -> str:
         return f"{name}:{json.dumps(arguments, sort_keys=True, ensure_ascii=False)}"
+
+    @staticmethod
+    def _last_user_text(history: list[Message]) -> str:
+        for message in reversed(history):
+            if message.role == "user":
+                return message.content
+        return ""
 
     def _return_loop_failure(
         self,

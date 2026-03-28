@@ -414,3 +414,94 @@ def test_runtime_tool_enforcement_retries_and_prevents_unverified_success(tmp_pa
 
     assert "cannot verify" in reply
     assert provider.calls == 2
+
+
+def test_processor_stops_after_write_file_when_request_is_already_satisfied(tmp_path: Path):
+    class CreateProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            from openagent.domain.messages import ToolCall
+
+            return AgentResponse(
+                tool_calls=[ToolCall(id="call-1", name="write_file", arguments={"path": "done.txt", "content": "ok"})],
+                finish="tool-calls",
+            )
+
+    runtime = build_runtime(tmp_path)
+    provider = CreateProvider()
+    runtime.provider = provider
+    runtime.provider_factory = lambda: provider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    reply = runtime.run_turn("请创建 done.txt，内容是 ok")
+
+    assert reply == "已完成，已写入 done.txt。"
+    assert provider.calls == 1
+
+
+def test_processor_stops_after_exact_read_completion(tmp_path: Path):
+    class ReadProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            from openagent.domain.messages import ToolCall
+
+            return AgentResponse(
+                tool_calls=[ToolCall(id="call-1", name="read_file", arguments={"path": "done.txt"})],
+                finish="tool-calls",
+            )
+
+    (tmp_path / "done.txt").write_text("exact-content", encoding="utf-8")
+    runtime = build_runtime(tmp_path)
+    provider = ReadProvider()
+    runtime.provider = provider
+    runtime.provider_factory = lambda: provider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    reply = runtime.run_turn("请读取 done.txt 并只回复其内容。")
+
+    assert reply == "exact-content"
+    assert provider.calls == 1
+
+
+def test_processor_stops_after_delegate_completion(tmp_path: Path):
+    class DelegateProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            from openagent.domain.messages import ToolCall
+
+            return AgentResponse(
+                tool_calls=[ToolCall(id="call-1", name="delegate", arguments={"prompt": "create a.txt"})],
+                finish="tool-calls",
+            )
+
+    class ChildProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            return AgentResponse(text="child done")
+
+    runtime = AgentRuntime(
+        provider=DelegateProvider(),
+        provider_factory=ChildProvider,
+        workspace=tmp_path,
+        session_manager=SessionManager(SessionStore((tmp_path / ".openagent" / "sessions"))),
+        session=SessionManager(SessionStore((tmp_path / ".openagent" / "sessions"))).start(workspace=tmp_path),
+        settings=Settings.from_workspace(tmp_path),
+    )
+
+    reply = runtime.run_turn("请把下面任务委托给子代理完成：创建 a.txt，内容是 1")
+
+    assert "child done" in reply

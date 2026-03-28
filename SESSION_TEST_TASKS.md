@@ -278,3 +278,26 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
 - todo 会持久化
 - retry 会重跑最后一条用户消息，并在 session 中留下 `retry` part
 - revert 会撤销最后一轮，并留下 `snapshot` 类型的 session-op 记录
+
+## 13. Completion Detection / Termination Condition
+
+命令：
+
+```bash
+python - <<'PY'
+from pathlib import Path
+path = Path('/root/open-claude-code/work')
+path.mkdir(exist_ok=True)
+(path / 'already_done.txt').write_text('step-1\nstep-2-done\n', encoding='utf-8')
+PY
+
+./openagent.sh --prompt "请把 work/already_done.txt 中的 step-2 改成 step-2-done。"
+./openagent.sh --prompt "请把下面任务委托给子代理完成：创建 work/subagent_note_fix.txt，内容是 delegated-n。完成后直接告诉我结果。"
+```
+
+理论预期：
+
+- 第一个任务不应再进入无意义的 read/edit/read 循环
+- 应直接停在“已经满足目标”的回复上
+- 第二个任务不应在子代理完成后继续工具循环直到 `max_steps_exceeded`
+- 应直接基于 delegate 结果收尾

@@ -158,6 +158,13 @@ The processor now runs through a basic streaming pipeline:
 - final assistant/tool messages are persisted after stream completion
 - `openagent --stream` renders assistant text deltas live in the terminal
 
+The processor also contains session-level completion heuristics for common tool-driven tasks:
+
+- exact file reads can stop on the trusted `read_file` result
+- write/create tasks can stop once the written content already matches the request
+- edit tasks can stop once the requested replacement is already satisfied
+- delegate tasks can stop directly on an authoritative subagent report when the user explicitly asks for the result
+
 The runtime prompt is assembled from:
 
 - base system prompt
