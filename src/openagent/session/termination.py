@@ -93,6 +93,11 @@ def _write_or_edit_completion(
     replace_pair = _extract_replace_pair(user_text)
     if tool_name == "edit_file" and replace_pair is not None:
         old_text, new_text = replace_pair
+        before_content = metadata.get("before_content")
+        if isinstance(before_content, str):
+            expected_after = before_content.replace(old_text, new_text, 1)
+            if _normalize_ws(after_content) == _normalize_ws(expected_after):
+                return TerminationDecision(True, f"已完成，已修改 {path}。", "edit-satisfied")
         if new_text in after_content and old_text not in after_content:
             return TerminationDecision(True, f"已完成，已修改 {path}。", "edit-satisfied")
 

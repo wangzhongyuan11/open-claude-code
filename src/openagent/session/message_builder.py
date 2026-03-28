@@ -87,7 +87,7 @@ class ToolMessageBuilder:
     def __post_init__(self) -> None:
         self.message = Message(
             role="tool",
-            content=self.content,
+            content="",
             tool_call_id=self.tool_call_id,
             name=self.name,
             parts=[],
@@ -177,4 +177,5 @@ class ToolMessageBuilder:
         )
 
     def build(self) -> Message:
+        self.message.content = self.message._derive_content_from_parts()
         return self.message

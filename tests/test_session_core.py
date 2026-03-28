@@ -447,6 +447,68 @@ def test_processor_stops_after_write_file_when_request_is_already_satisfied(tmp_
     assert provider.calls == 1
 
 
+def test_tool_message_content_for_read_file_is_not_duplicated(tmp_path: Path):
+    class ReadProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            from openagent.domain.messages import ToolCall
+
+            return AgentResponse(
+                tool_calls=[ToolCall(id="call-1", name="read_file", arguments={"path": "done.txt"})],
+                finish="tool-calls",
+            )
+
+    (tmp_path / "done.txt").write_text("exact-content", encoding="utf-8")
+    runtime = build_runtime(tmp_path)
+    provider = ReadProvider()
+    runtime.provider = provider
+    runtime.provider_factory = lambda: provider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    reply = runtime.run_turn("请读取 done.txt 并只回复其内容。")
+
+    tool_message = next(message for message in runtime.session.messages if message.role == "tool")
+    assert tool_message.content == "exact-content"
+    assert reply == "exact-content"
+
+
+def test_processor_stops_after_edit_file_when_after_content_matches_expected(tmp_path: Path):
+    class EditProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            from openagent.domain.messages import ToolCall
+
+            return AgentResponse(
+                tool_calls=[
+                    ToolCall(
+                        id="call-1",
+                        name="edit_file",
+                        arguments={"path": "story.txt", "old_text": "第二行", "new_text": "第二行-完成"},
+                    )
+                ],
+                finish="tool-calls",
+            )
+
+    (tmp_path / "story.txt").write_text("第一行\n第二行", encoding="utf-8")
+    runtime = build_runtime(tmp_path)
+    provider = EditProvider()
+    runtime.provider = provider
+    runtime.provider_factory = lambda: provider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    reply = runtime.run_turn("请把 story.txt 中的 第二行 改成 第二行-完成。")
+
+    assert reply == "已完成，已修改 story.txt。"
+
+
 def test_processor_stops_after_exact_read_completion(tmp_path: Path):
     class ReadProvider(BaseProvider):
         def __init__(self):

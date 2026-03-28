@@ -139,6 +139,10 @@ class Message:
         return parts
 
     def _derive_content_from_parts(self) -> str:
+        if self.role == "tool":
+            file_chunks = _extract_file_chunks(self.parts)
+            if file_chunks:
+                return "\n".join(chunk for chunk in file_chunks if chunk).strip()
         chunks: list[str] = []
         for part in self.parts:
             if part.type in {"text", "reasoning", "patch"} and isinstance(part.content, str):
@@ -173,3 +177,18 @@ class AgentResponse:
     @property
     def requests_tools(self) -> bool:
         return self.finish == "tool-calls" or bool(self.tool_calls)
+
+
+def _extract_file_chunks(parts: list[Part]) -> list[str]:
+    chunks: list[str] = []
+    for part in parts:
+        if part.type != "file":
+            continue
+        if isinstance(part.content, str):
+            chunks.append(part.content)
+            continue
+        if isinstance(part.content, dict):
+            text = part.content.get("content")
+            if isinstance(text, str):
+                chunks.append(text)
+    return chunks
