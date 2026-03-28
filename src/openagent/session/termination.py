@@ -72,6 +72,8 @@ def _delegate_completion(user_text: str, content: str) -> TerminationDecision | 
 
 
 def _read_completion(user_text: str, content: str) -> TerminationDecision | None:
+    if _requests_partial_read(user_text):
+        return None
     if any(token in user_text for token in ["只回复其内容", "原样输出", "原样返回", "exact output"]):
         return TerminationDecision(True, content, "exact-read")
     return None
@@ -152,3 +154,13 @@ def _normalize_ws(text: str) -> str:
 
 def _is_multistep_request(user_text: str) -> bool:
     return len(re.findall(r"(?m)^\s*\d+\.\s+", user_text)) >= 2
+
+
+def _requests_partial_read(user_text: str) -> bool:
+    return bool(
+        re.search(r"前\s*\d+\s*行", user_text)
+        or re.search(r"后\s*\d+\s*行", user_text)
+        or "前几行" in user_text
+        or "后几行" in user_text
+        or "line " in user_text.lower()
+    )

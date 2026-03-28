@@ -332,6 +332,28 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
   - `logs/run.log` 第二行为 `[STATUS] verified`
   - `docs/subtask_note.txt` 由子代理创建，内容精确匹配
 - 最终回复必须明确包含 `任务全部完成`
+
+## 14. 工具生命周期与截断
+
+输入：
+
+```text
+请读取一个非常大的文本文件，或者执行一个会产生大量输出的命令。
+```
+
+理论预期：
+
+- 工具调用会在事件流中经过：
+  - `tool.pending`
+  - `tool.running`
+  - `tool.succeeded` / `tool.failed`
+- 若输出过大：
+  - 返回内容应带截断提示
+  - 完整输出应被写入 `.openagent/tool_outputs/`
+  - tool result metadata 中应记录：
+    - `truncated`
+    - `output_path`
+    - `duration_ms`
   - `patch`
   - `snapshot`
 

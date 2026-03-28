@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from openagent.domain.tools import ToolContext, ToolExecutionResult
+from openagent.domain.tools import ToolContext, ToolExecutionResult, ToolOutputLimits
 from openagent.tools.base import BaseTool
 
 IGNORED_TOP_LEVEL_NAMES = {
@@ -24,6 +24,7 @@ def resolve_workspace_path(workspace: Path, raw_path: str) -> Path:
 class ReadFileTool(BaseTool):
     name = "read_file"
     description = "Read a UTF-8 text file from the workspace."
+    output_limits = ToolOutputLimits(max_chars=16000, max_lines=500, direction="head")
     input_schema = {
         "type": "object",
         "properties": {
@@ -35,8 +36,9 @@ class ReadFileTool(BaseTool):
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         path = resolve_workspace_path(context.workspace, arguments["path"])
         content = path.read_text(encoding="utf-8")
-        return ToolExecutionResult(
-            content=content,
+        return ToolExecutionResult.success(
+            content,
+            title=f"Read {arguments['path']}",
             metadata={
                 "path": arguments["path"],
                 "content": content,
@@ -64,10 +66,12 @@ class WriteFileTool(BaseTool):
         path.parent.mkdir(parents=True, exist_ok=True)
         after_content = arguments["content"]
         path.write_text(after_content, encoding="utf-8")
-        return ToolExecutionResult(
-            content=f"wrote {len(arguments['content'])} bytes to {arguments['path']}",
+        return ToolExecutionResult.success(
+            f"wrote {len(arguments['content'])} bytes to {arguments['path']}",
+            title=f"Wrote {arguments['path']}",
             metadata={
                 "path": arguments["path"],
+                "operation": "write_file",
                 "before_content": before_content,
                 "after_content": after_content,
                 "before_exists": before_exists,
@@ -97,10 +101,12 @@ class AppendFileTool(BaseTool):
         with path.open("a", encoding="utf-8") as handle:
             handle.write(arguments["content"])
         after_content = path.read_text(encoding="utf-8")
-        return ToolExecutionResult(
-            content=f"appended {len(arguments['content'])} bytes to {arguments['path']}",
+        return ToolExecutionResult.success(
+            f"appended {len(arguments['content'])} bytes to {arguments['path']}",
+            title=f"Appended {arguments['path']}",
             metadata={
                 "path": arguments["path"],
+                "operation": "append_file",
                 "before_content": before_content,
                 "after_content": after_content,
                 "before_exists": before_exists,
@@ -113,6 +119,7 @@ class AppendFileTool(BaseTool):
 class ListFilesTool(BaseTool):
     name = "list_files"
     description = "List workspace files recursively."
+    output_limits = ToolOutputLimits(max_chars=12000, max_lines=600, direction="head")
     input_schema = {
         "type": "object",
         "properties": {},
@@ -124,7 +131,11 @@ class ListFilesTool(BaseTool):
             for path in sorted(context.workspace.rglob("*"))
             if path.is_file() and not _is_ignored(path, context.workspace)
         ]
-        return ToolExecutionResult(content="\n".join(files) if files else "(no files)")
+        return ToolExecutionResult.success(
+            "\n".join(files) if files else "(no files)",
+            title="Listed workspace files",
+            metadata={"file_count": str(len(files))},
+        )
 
 
 def _is_ignored(path: Path, workspace: Path) -> bool:

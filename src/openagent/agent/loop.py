@@ -17,6 +17,8 @@ class AgentLoop:
         tool_context: ToolContext,
         event_bus: EventBus | None = None,
     ) -> None:
+        if tool_context.event_bus is None:
+            tool_context.event_bus = event_bus
         self.processor = SessionProcessor(
             provider=provider,
             tool_registry=tool_registry,

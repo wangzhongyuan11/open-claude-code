@@ -25,13 +25,21 @@ class EditFileTool(BaseTool):
         content = path.read_text(encoding="utf-8")
         old_text = arguments["old_text"]
         if old_text not in content:
-            return ToolExecutionResult(content="target text not found", is_error=True)
+            return ToolExecutionResult.failure(
+                "target text not found",
+                error_type="target_not_found",
+                retryable=False,
+                hint="Read the file again and use the exact current text for old_text.",
+                metadata={"path": arguments["path"], "operation": "edit_file"},
+            )
         updated = content.replace(old_text, arguments["new_text"], 1)
         path.write_text(updated, encoding="utf-8")
-        return ToolExecutionResult(
-            content=f"edited {arguments['path']}",
+        return ToolExecutionResult.success(
+            f"edited {arguments['path']}",
+            title=f"Edited {arguments['path']}",
             metadata={
                 "path": arguments["path"],
+                "operation": "edit_file",
                 "before_content": content,
                 "after_content": updated,
                 "snapshot_before_ref": _snapshot_ref(arguments["path"], content),

@@ -205,6 +205,7 @@ The processor now runs through a basic streaming pipeline:
 The processor also contains session-level completion heuristics for common tool-driven tasks:
 
 - exact file reads can stop on the trusted `read_file` result
+- partial file reads such as “前 2 行” are not treated as whole-file exact reads
 - write/create tasks can stop once the written content already matches the request
 - edit tasks can stop once the requested replacement is already satisfied
 - delegate tasks can stop directly on an authoritative subagent report when the user explicitly asks for the result
@@ -249,6 +250,60 @@ Persisted message parts now cover more operational and artifact cases:
 - `subtask`: delegate/subagent results
 - `retry`: retry scheduling metadata
 
+## Tool Runtime
+
+The tool layer is now a proper execution subsystem instead of a loose handler map.
+
+- `tools/base.py`
+  - defines the shared tool protocol
+  - every tool exposes a stable id/name, description, input schema, optional init hook, and output limits
+- `tools/registry.py`
+  - owns registration, lookup, filtered tool discovery, permission checks, argument validation, execution, output truncation, lifecycle events, and error wrapping
+- `tools/truncation.py`
+  - provides a central truncation layer for oversized tool output
+  - writes full output to `.openagent/tool_outputs/` and returns a preview plus metadata when needed
+- `domain/tools.py`
+  - defines `ToolSpec`, `ToolContext`, `ToolExecutionResult`, `ToolError`, `ToolArtifact`, and output limits
+
+Current tool execution model:
+
+- tools are registered through a single `ToolRegistry`
+- the processor resolves model tool calls through the registry
+- each invocation receives a context-aware `ToolContext`, including:
+  - workspace
+  - session id
+  - current assistant message id
+  - current tool call id
+  - agent name
+  - event bus
+- every tool result is normalized into a shared result structure:
+  - `title`
+  - `content` / output
+  - `metadata`
+  - `error`
+  - `artifacts`
+  - `status`
+  - `truncated`
+
+Tool lifecycle events emitted to the JSONL event stream now include:
+
+- `tool.pending`
+- `tool.running`
+- `tool.succeeded`
+- `tool.failed`
+- `tool.timed_out`
+- `tool.cancelled`
+
+The existing `tool.called` / `tool.completed` events are still emitted for compatibility.
+
+Current tool sources supported by the registry:
+
+- built-in tools registered directly from runtime
+- custom tools registered programmatically via `register()`
+- factory-based tools registered via `register_factory()`
+
+This is the compatibility layer that future MCP/plugin/provider-specific tools should plug into.
+
 ## Manual Validation Tasks
 
 See [`SESSION_TEST_TASKS.md`](./SESSION_TEST_TASKS.md) for a concrete prompt-by-prompt validation checklist, including:
@@ -264,6 +319,7 @@ See [`SESSION_TEST_TASKS.md`](./SESSION_TEST_TASKS.md) for a concrete prompt-by-
 - status / retry / revert / todo helpers
 - patch / snapshot / compaction / retry parts
 - end-to-end numbered checklist tasks with continuation after premature assistant stop
+- tool lifecycle events, structured tool results, and truncation behavior
 
 ## Work Log
 

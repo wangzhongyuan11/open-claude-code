@@ -36,6 +36,8 @@ DEFAULT_SYSTEM_PROMPT = """You are a Python coding agent working in a local repo
 Use tools when needed.
 Prefer reading files before editing them.
 Prefer dedicated file tools (`read_file`, `write_file`, `append_file`, `edit_file`) over `bash` whenever they are sufficient for the task.
+For plain workspace file reads, use `read_file` instead of `bash`.
+Reserve `bash` for shell-native tasks such as running commands, not for ordinary file reads or simple file edits when a dedicated tool exists.
 Keep changes precise and minimal.
 If the user asks you to read, create, edit, append, list, inspect, or execute something in the workspace, you must use the appropriate tool rather than claiming success from reasoning alone.
 Never claim a file was created, edited, appended, or read unless you actually obtained a tool result that proves it.
@@ -86,7 +88,13 @@ class AgentRuntime:
         self.loop = AgentLoop(
             provider=self.provider,
             tool_registry=self.registry,
-            tool_context=ToolContext(workspace=self.workspace),
+            tool_context=ToolContext(
+                workspace=self.workspace,
+                session_id=self.session.id,
+                agent_name="main",
+                event_bus=self.event_bus,
+                runtime_state={"mode": "runtime"},
+            ),
             event_bus=self.event_bus,
         )
 

@@ -48,4 +48,7 @@ def test_agent_loop_emits_events(tmp_path: Path):
 
     assert "model.requested" in event_types
     assert "tool.called" in event_types
+    assert "tool.pending" in event_types
+    assert "tool.running" in event_types
+    assert "tool.succeeded" in event_types
     assert "tool.completed" in event_types

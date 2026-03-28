@@ -49,7 +49,13 @@ class SubagentManager:
         loop = AgentLoop(
             provider=provider,
             tool_registry=registry,
-            tool_context=ToolContext(workspace=self.workspace, metadata={"agent": "subagent"}),
+            tool_context=ToolContext(
+                workspace=self.workspace,
+                session_id="subagent",
+                agent_name="subagent",
+                event_bus=self.event_bus,
+                metadata={"agent": "subagent"},
+            ),
             event_bus=self.event_bus,
         )
         history = loop.run(

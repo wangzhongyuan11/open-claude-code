@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import difflib
 
 from openagent.domain.messages import Message, Part
+from openagent.domain.tools import ToolArtifact, ToolExecutionResult
 
 
 @dataclass(slots=True)
@@ -81,7 +82,7 @@ class ToolMessageBuilder:
     tool_call_id: str
     arguments: dict
     content: str
-    is_error: bool = False
+    result: ToolExecutionResult | None = None
     message: Message = field(init=False)
 
     def __post_init__(self) -> None:
@@ -94,16 +95,29 @@ class ToolMessageBuilder:
         )
 
     def add_tool_result(self) -> None:
+        metadata = self.result.metadata if self.result is not None else {}
+        error_payload = None
+        if self.result is not None and self.result.error is not None:
+            error_payload = {
+                "type": self.result.error.type,
+                "message": self.result.error.message,
+                "retryable": self.result.error.retryable,
+                "hint": self.result.error.hint,
+            }
         self.message.add_part(
             Part(
                 type="tool",
                 content={
                     "tool_call_id": self.tool_call_id,
                     "name": self.name,
+                    "title": self.result.title if self.result is not None else self.name,
                     "arguments": self.arguments,
                     "output": self.content,
+                    "metadata": metadata,
+                    "error": error_payload,
+                    "truncated": self.result.truncated if self.result is not None else False,
                 },
-                state={"status": "error" if self.is_error else "completed"},
+                state={"status": self.result.status if self.result is not None else "succeeded"},
             )
         )
 
@@ -111,7 +125,7 @@ class ToolMessageBuilder:
         path = self.arguments.get("path")
         if not path:
             return
-        state = {"status": "error" if self.is_error else "completed"}
+        state = {"status": self.result.status if self.result is not None else "succeeded"}
         if mutation:
             state["mutation"] = mutation
         self.message.add_part(
@@ -172,9 +186,26 @@ class ToolMessageBuilder:
                     "prompt": self.arguments.get("prompt", ""),
                     "result": self.content,
                 },
-                state={"status": "error" if self.is_error else "completed"},
+                state={"status": self.result.status if self.result is not None else "succeeded"},
             )
         )
+
+    def add_artifact_results(self, artifacts: list[ToolArtifact]) -> None:
+        for artifact in artifacts:
+            if artifact.kind in {"file", "tool-output"} and artifact.path:
+                self.message.add_part(
+                    Part(
+                        type="file",
+                        content={
+                            "source": "artifact",
+                            "path": artifact.path,
+                            "kind": artifact.kind,
+                            "description": artifact.description,
+                            "content": self.content if artifact.kind == "file" else "",
+                        },
+                        state={"status": "recorded"},
+                    )
+                )
 
     def build(self) -> Message:
         self.message.content = self.message._derive_content_from_parts()

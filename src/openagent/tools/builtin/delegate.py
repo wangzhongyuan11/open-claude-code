@@ -24,8 +24,9 @@ class DelegateTool(BaseTool):
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         result = self.subagent_manager.run(arguments["prompt"])
-        return ToolExecutionResult(
-            content=format_subagent_report(result),
+        return ToolExecutionResult.success(
+            format_subagent_report(result),
+            title="Delegated subtask",
             metadata={
                 "message_count": len(result.history),
                 "touched_paths": result.touched_paths,

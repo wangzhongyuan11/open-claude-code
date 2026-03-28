@@ -72,21 +72,34 @@ class SessionProcessor:
 
             for tool_call in response.tool_calls:
                 tool_call_count += 1
+                tool_context = self.tool_context.child(
+                    message_id=assistant_message.id,
+                    tool_call_id=tool_call.id,
+                    metadata={"tool_name": tool_call.name},
+                )
                 self._emit(
                     "tool.called",
-                    {"name": tool_call.name, "tool_call_id": tool_call.id},
+                    {
+                        "name": tool_call.name,
+                        "tool_call_id": tool_call.id,
+                        "session_id": tool_context.session_id,
+                        "message_id": tool_context.message_id,
+                    },
                 )
                 result = self.tool_registry.invoke(
                     name=tool_call.name,
                     arguments=tool_call.arguments,
-                    context=self.tool_context,
+                    context=tool_context,
                 )
                 self._emit(
                     "tool.completed",
                     {
                         "name": tool_call.name,
                         "tool_call_id": tool_call.id,
+                        "status": result.status,
                         "is_error": result.is_error,
+                        "truncated": result.truncated,
+                        "duration_ms": result.metadata.get("duration_ms"),
                     },
                 )
                 history.append(
@@ -94,9 +107,7 @@ class SessionProcessor:
                         tool_call.name,
                         tool_call.id,
                         tool_call.arguments,
-                        result.content,
-                        result.is_error,
-                        result.metadata,
+                        result,
                     )
                 )
                 last_tool_result = (tool_call.name, result.content)
@@ -214,7 +225,7 @@ class SessionProcessor:
         for event in self.llm.stream_generate(
             LLMRequest(
                 messages=messages,
-                tools=self.tool_registry.specs(),
+                tools=self.tool_registry.specs(self.tool_context),
                 system_prompt=system_prompt,
                 estimated_tokens=estimated_tokens,
             )
@@ -277,16 +288,14 @@ class SessionProcessor:
         tool_name: str,
         tool_call_id: str,
         arguments: dict,
-        content: str,
-        is_error: bool,
-        metadata: dict,
+        result,
     ) -> Message:
         builder = ToolMessageBuilder(
             name=tool_name,
             tool_call_id=tool_call_id,
             arguments=arguments,
-            content=content,
-            is_error=is_error,
+            content=result.content,
+            result=result,
         )
         builder.add_tool_result()
         self._emit("processor.part.appended", {"role": "tool", "part_type": "tool", "tool_name": tool_name})
@@ -300,6 +309,10 @@ class SessionProcessor:
         elif tool_name == "delegate":
             builder.add_subtask_result()
             self._emit("processor.part.appended", {"role": "tool", "part_type": "subtask", "tool_name": tool_name})
+        if result.artifacts:
+            builder.add_artifact_results(result.artifacts)
+            self._emit("processor.part.appended", {"role": "tool", "part_type": "file", "tool_name": tool_name, "artifact_count": len(result.artifacts)})
+        metadata = result.metadata
         path = metadata.get("path") or arguments.get("path")
         before_content = metadata.get("before_content")
         after_content = metadata.get("after_content")
