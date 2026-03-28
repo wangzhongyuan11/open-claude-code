@@ -27,17 +27,21 @@ from openagent.session.task_validation import (
 )
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.delegate import DelegateTool
-from openagent.tools.builtin.edit import EditFileTool
-from openagent.tools.builtin.files import AppendFileTool, ListFilesTool, ReadFileTool, WriteFileTool
+from openagent.tools.builtin.edit import EditFileTool, MultiEditTool
+from openagent.tools.builtin.files import AppendFileTool, ListFilesTool, ReadFileTool, ReadFileRangeTool, WriteFileTool
+from openagent.tools.builtin.patch import ApplyPatchTool
+from openagent.tools.builtin.search import GlobTool, GrepTool, LsTool
 from openagent.tools.registry import ToolRegistry
 
 
 DEFAULT_SYSTEM_PROMPT = """You are a Python coding agent working in a local repository.
 Use tools when needed.
 Prefer reading files before editing them.
-Prefer dedicated file tools (`read_file`, `write_file`, `append_file`, `edit_file`) over `bash` whenever they are sufficient for the task.
-For plain workspace file reads, use `read_file` instead of `bash`.
-Reserve `bash` for shell-native tasks such as running commands, not for ordinary file reads or simple file edits when a dedicated tool exists.
+Prefer dedicated tools (`ls`, `glob`, `grep`, `read_file`, `read_file_range`, `write_file`, `append_file`, `edit_file`, `apply_patch`) over `bash` whenever they are sufficient for the task.
+For plain workspace file reads, use `read_file` or `read_file_range` instead of `bash`.
+For directory inspection, use `ls` or `glob` instead of `bash`.
+For repository text search, use `grep` instead of `bash`.
+Reserve `bash` for shell-native tasks such as running commands, not for ordinary file reads, file searches, or simple file edits when a dedicated tool exists.
 Keep changes precise and minimal.
 If the user asks you to read, create, edit, append, list, inspect, or execute something in the workspace, you must use the appropriate tool rather than claiming success from reasoning alone.
 Never claim a file was created, edited, appended, or read unless you actually obtained a tool result that proves it.
@@ -236,10 +240,16 @@ class AgentRuntime:
     def _build_registry(self) -> ToolRegistry:
         registry = ToolRegistry()
         registry.register(ReadFileTool())
+        registry.register(ReadFileRangeTool())
         registry.register(WriteFileTool())
         registry.register(AppendFileTool())
         registry.register(EditFileTool())
+        registry.register(MultiEditTool())
+        registry.register(ApplyPatchTool())
         registry.register(ListFilesTool())
+        registry.register(LsTool())
+        registry.register(GlobTool())
+        registry.register(GrepTool())
         registry.register(BashTool(timeout_seconds=self.settings.bash_timeout_seconds))
         registry.register(DelegateTool(self.subagent_manager))
         return registry
@@ -247,10 +257,16 @@ class AgentRuntime:
     def _build_subagent_registry(self) -> ToolRegistry:
         registry = ToolRegistry()
         registry.register(ReadFileTool())
+        registry.register(ReadFileRangeTool())
         registry.register(WriteFileTool())
         registry.register(AppendFileTool())
         registry.register(EditFileTool())
+        registry.register(MultiEditTool())
+        registry.register(ApplyPatchTool())
         registry.register(ListFilesTool())
+        registry.register(LsTool())
+        registry.register(GlobTool())
+        registry.register(GrepTool())
         registry.register(BashTool(timeout_seconds=self.settings.bash_timeout_seconds))
         return registry
 

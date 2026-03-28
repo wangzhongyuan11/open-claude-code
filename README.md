@@ -304,6 +304,32 @@ Current tool sources supported by the registry:
 
 This is the compatibility layer that future MCP/plugin/provider-specific tools should plug into.
 
+Current built-in local tools:
+
+- `ls`
+- `glob`
+- `grep`
+- `read_file`
+- `read_file_range`
+- `write_file`
+- `append_file`
+- `edit_file`
+- `multiedit`
+- `apply_patch`
+- `list_files`
+- `bash`
+- `delegate`
+
+The local coding toolchain now covers the common repository workflow:
+
+- inspect directory structure
+- find files by pattern
+- search code/text
+- read exact files or line ranges
+- write/append/edit files
+- apply a unified diff patch
+- run shell commands when a shell-native action is really needed
+
 ## Manual Validation Tasks
 
 See [`SESSION_TEST_TASKS.md`](./SESSION_TEST_TASKS.md) for a concrete prompt-by-prompt validation checklist, including:
@@ -320,6 +346,16 @@ See [`SESSION_TEST_TASKS.md`](./SESSION_TEST_TASKS.md) for a concrete prompt-by-
 - patch / snapshot / compaction / retry parts
 - end-to-end numbered checklist tasks with continuation after premature assistant stop
 - tool lifecycle events, structured tool results, and truncation behavior
+
+Example continuous CLI validation chain for the tool runtime:
+
+- inspect `src/openagent/tools` with `ls` / `glob`
+- locate `tool.pending` and `tool.succeeded` with `grep`
+- create a deliberately broken sample module under `work/cli_chain_v2`
+- run `pytest` with `bash` and observe failure
+- repair the file with `apply_patch`
+- rerun `pytest`
+- confirm the final file content and test result
 
 ## Work Log
 

@@ -47,6 +47,48 @@ class ReadFileTool(BaseTool):
         )
 
 
+class ReadFileRangeTool(BaseTool):
+    tool_id = "read_file_range"
+    name = "read_file_range"
+    description = "Read a specific line range from a UTF-8 text file."
+    output_limits = ToolOutputLimits(max_chars=12000, max_lines=300, direction="head")
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+            "start_line": {"type": "integer"},
+            "end_line": {"type": "integer"},
+        },
+        "required": ["path", "start_line", "end_line"],
+    }
+
+    def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
+        path = resolve_workspace_path(context.workspace, arguments["path"])
+        start_line = int(arguments["start_line"])
+        end_line = int(arguments["end_line"])
+        if start_line <= 0 or end_line < start_line:
+            return ToolExecutionResult.failure(
+                "invalid line range",
+                error_type="invalid_range",
+                hint="Use 1-based line numbers with end_line >= start_line.",
+                metadata={"path": arguments["path"], "start_line": str(start_line), "end_line": str(end_line)},
+            )
+        lines = path.read_text(encoding="utf-8").splitlines()
+        selected = lines[start_line - 1 : end_line]
+        content = "\n".join(selected)
+        return ToolExecutionResult.success(
+            content,
+            title=f"Read lines {start_line}-{end_line} from {arguments['path']}",
+            metadata={
+                "path": arguments["path"],
+                "start_line": str(start_line),
+                "end_line": str(end_line),
+                "content": content,
+                "snapshot_after_ref": _snapshot_ref(arguments["path"], "\n".join(lines)),
+            },
+        )
+
+
 class WriteFileTool(BaseTool):
     name = "write_file"
     description = "Write UTF-8 text content to a file in the workspace."

@@ -300,10 +300,10 @@ class SessionProcessor:
         builder.add_tool_result()
         self._emit("processor.part.appended", {"role": "tool", "part_type": "tool", "tool_name": tool_name})
         path = arguments.get("path")
-        if path and tool_name == "read_file":
+        if path and tool_name in {"read_file", "read_file_range"}:
             builder.add_file_result()
             self._emit("processor.part.appended", {"role": "tool", "part_type": "file", "tool_name": tool_name})
-        elif path and tool_name in {"write_file", "append_file", "edit_file"}:
+        elif path and tool_name in {"write_file", "append_file", "edit_file", "multiedit", "apply_patch"}:
             builder.add_file_result(mutation=tool_name)
             self._emit("processor.part.appended", {"role": "tool", "part_type": "file", "tool_name": tool_name})
         elif tool_name == "delegate":

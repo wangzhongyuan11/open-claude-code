@@ -354,6 +354,25 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
     - `truncated`
     - `output_path`
     - `duration_ms`
+
+## 15. 连续多轮工具链验证
+
+建议在同一个 session 内按顺序执行：
+
+1. 使用 `ls` / `glob` 查看 `src/openagent/tools`
+2. 使用 `grep` 查找 `tool.pending`
+3. 创建一个故意带 bug 的最小 Python 示例
+4. 使用 `bash` 运行受限范围内的 pytest，观察失败
+5. 使用 `apply_patch` 或 `edit_file` 修复
+6. 再次运行 pytest
+7. 使用 `read_file_range` 只读取修复后的关键行
+
+理论预期：
+
+- 对话上下文应连续保留
+- 至少串联 3 种以上工具
+- 必须经过一次真实失败，再修复成功
+- 最终文件内容和外部 pytest 结果应一致
   - `patch`
   - `snapshot`
 
