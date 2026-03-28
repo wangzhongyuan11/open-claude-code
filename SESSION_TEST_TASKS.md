@@ -270,6 +270,7 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
 5. 再次用 `bash` 跑测试，并用 `grep` 或 `codesearch` 确认 `return a + b`
 6. 用 `task` 委托子代理创建 `notes.txt`
 7. 用 `todowrite` 写入两个 todo，再用 `todoread` 读取
+8. 用 `ensure_dir` 创建 `work/tool_runtime_chain/output`
 
 理论预期：
 
@@ -281,6 +282,7 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
   - `python -m pytest test_math_utils.py -q` 结果为 `1 passed`
   - `work/tool_runtime_chain/notes.txt` 内容为 `done-by-task`
   - session.json 中 todo 列表包含两条记录
+  - `work/tool_runtime_chain/output` 最终存在且为目录
 
 ## 13. 多步 Checklist 任务不应提前结束
 

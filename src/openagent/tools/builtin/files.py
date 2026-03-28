@@ -180,6 +180,42 @@ class ListFilesTool(BaseTool):
         )
 
 
+class EnsureDirTool(BaseTool):
+    tool_id = "ensure_dir"
+    name = "ensure_dir"
+    description = "Ensure that a directory exists inside the workspace."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string"},
+        },
+        "required": ["path"],
+    }
+
+    def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
+        path = resolve_workspace_path(context.workspace, arguments["path"])
+        existed = path.exists()
+        if existed and not path.is_dir():
+            return ToolExecutionResult.failure(
+                f"path exists but is not a directory: {arguments['path']}",
+                error_type="not_a_directory",
+                hint="Choose a path that is either missing or already a directory.",
+                metadata={"path": arguments["path"], "operation": "ensure_dir"},
+            )
+        path.mkdir(parents=True, exist_ok=True)
+        return ToolExecutionResult.success(
+            f"directory ready: {arguments['path']}",
+            title=f"Ensured directory {arguments['path']}",
+            metadata={
+                "path": arguments["path"],
+                "operation": "ensure_dir",
+                "dir_exists": "true",
+                "already_existed": str(existed).lower(),
+                "snapshot_after_ref": f"snapshot:{arguments['path']}:dir",
+            },
+        )
+
+
 def _is_ignored(path: Path, workspace: Path) -> bool:
     relative_parts = path.relative_to(workspace).parts
     return any(part in IGNORED_TOP_LEVEL_NAMES for part in relative_parts)

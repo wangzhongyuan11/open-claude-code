@@ -37,6 +37,12 @@ def detect_completion(
         if decision:
             return decision
 
+    if tool_name == "ensure_dir":
+        if metadata.get("dir_exists") == "true":
+            path = str(metadata.get("path") or arguments.get("path") or "")
+            if any(token in user_text for token in ["创建目录", "创建文件夹", "ensure directory", "make directory", "mkdir"]):
+                return TerminationDecision(True, f"已完成，目录已就绪：{path}", "directory-satisfied")
+
     if tool_name in {"write_file", "append_file", "edit_file", "write", "edit", "apply_patch", "patch", "multiedit", "replace_all", "insert_text"}:
         decision = _write_or_edit_completion(user_text, tool_name, arguments, metadata)
         if decision:

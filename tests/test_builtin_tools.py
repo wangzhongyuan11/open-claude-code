@@ -3,7 +3,7 @@ from pathlib import Path
 from openagent.domain.tools import ToolContext
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.edit import EditFileTool, InsertTextTool, MultiEditTool, ReplaceAllTool
-from openagent.tools.builtin.files import AppendFileTool, ListFilesTool, ReadFileRangeTool, ReadFileTool, WriteFileTool
+from openagent.tools.builtin.files import AppendFileTool, EnsureDirTool, ListFilesTool, ReadFileRangeTool, ReadFileTool, WriteFileTool
 from openagent.tools.builtin.patch import ApplyPatchTool
 from openagent.tools.builtin.search import GlobTool, GrepTool, LsTool
 
@@ -58,6 +58,15 @@ def test_append_file_tool(tmp_path: Path):
 
     assert not result.is_error
     assert (tmp_path / "a.txt").read_text(encoding="utf-8") == "alpha\nbeta\n"
+
+
+def test_ensure_dir_tool(tmp_path: Path):
+    context = ToolContext(workspace=tmp_path)
+
+    result = EnsureDirTool().invoke({"path": "nested/path"}, context)
+
+    assert not result.is_error
+    assert (tmp_path / "nested" / "path").is_dir()
 
 
 def test_read_file_range_tool(tmp_path: Path):

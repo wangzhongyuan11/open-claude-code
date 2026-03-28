@@ -28,7 +28,7 @@ from openagent.session.task_validation import (
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.delegate import DelegateTool
 from openagent.tools.builtin.edit import EditFileTool, InsertTextTool, MultiEditTool, ReplaceAllTool
-from openagent.tools.builtin.files import AppendFileTool, ListFilesTool, ReadFileTool, ReadFileRangeTool, WriteFileTool
+from openagent.tools.builtin.files import AppendFileTool, EnsureDirTool, ListFilesTool, ReadFileTool, ReadFileRangeTool, WriteFileTool
 from openagent.tools.builtin.integration import BatchTool, CodeSearchTool, LspTool, QuestionTool, ReadSymbolTool, SkillTool
 from openagent.tools.builtin.patch import ApplyPatchTool
 from openagent.tools.builtin.aliases import EditTool, PatchTool, ReadTool, TaskTool, TodoReadTool, TodoWriteTool, WriteTool
@@ -40,10 +40,11 @@ from openagent.tools.registry import ToolRegistry
 DEFAULT_SYSTEM_PROMPT = """You are a Python coding agent working in a local repository.
 Use tools when needed.
 Prefer reading files before editing them.
-Prefer dedicated tools (`ls`, `glob`, `grep`, `codesearch`, `read_file`, `read_file_range`, `read_symbol`, `write_file`, `append_file`, `edit_file`, `replace_all`, `insert_text`, `apply_patch`) over `bash` whenever they are sufficient for the task.
+Prefer dedicated tools (`ls`, `glob`, `grep`, `codesearch`, `read_file`, `read_file_range`, `read_symbol`, `ensure_dir`, `write_file`, `append_file`, `edit_file`, `replace_all`, `insert_text`, `apply_patch`) over `bash` whenever they are sufficient for the task.
 You also have opencode-style aliases (`read`, `write`, `edit`, `patch`, `task`, `todowrite`, `todoread`, `question`, `skill`, `lsp`, `codesearch`, `batch`, `webfetch`, `websearch`) that should be used deliberately when they better match the user's request.
 For plain workspace file reads, use `read_file`, `read_file_range`, or `read_symbol` instead of `bash`.
 For directory inspection, use `ls` or `glob` instead of `bash`.
+For directory creation, use `ensure_dir` instead of `bash mkdir -p`.
 For repository text search, use `grep` instead of `bash`.
 Reserve `bash` for shell-native tasks such as running commands, not for ordinary file reads, code searches, or simple file edits when a dedicated tool exists.
 Keep changes precise and minimal.
@@ -251,6 +252,7 @@ class AgentRuntime:
         registry.register(ReadFileTool())
         registry.register(ReadFileRangeTool())
         registry.register(ReadTool())
+        registry.register(EnsureDirTool())
         registry.register(WriteFileTool())
         registry.register(WriteTool())
         registry.register(AppendFileTool())
@@ -285,6 +287,7 @@ class AgentRuntime:
         registry.register(ReadFileTool())
         registry.register(ReadFileRangeTool())
         registry.register(ReadTool())
+        registry.register(EnsureDirTool())
         registry.register(WriteFileTool())
         registry.register(WriteTool())
         registry.register(AppendFileTool())

@@ -313,6 +313,7 @@ Current built-in local tools:
 - `read_file`
 - `read_file_range`
 - `read`
+- `ensure_dir`
 - `write_file`
 - `write`
 - `append_file`
@@ -344,6 +345,7 @@ The local coding toolchain now covers the common repository workflow:
 - search code/text
 - read exact files or line ranges
 - read a named Python symbol directly
+- ensure a directory exists without shelling out to `mkdir -p`
 - write/append/edit files
 - replace all exact occurrences
 - insert text around an anchor
@@ -412,6 +414,8 @@ Recent tool additions for editing precision and code understanding:
   - inserts text before or after an exact anchor string with full before/after snapshots
 - `read_symbol`
   - extracts a Python function/class definition using AST parsing and returns just that symbol body
+- `ensure_dir`
+  - ensures a workspace directory exists and reports whether it had to be created
 
 ## Work Log
 
