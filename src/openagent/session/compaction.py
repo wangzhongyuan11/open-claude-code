@@ -94,10 +94,19 @@ def plan_compaction(
 
 
 def apply_compaction(session: Session, plan: CompactionPlan) -> bool:
+    return apply_compaction_with_summary(session, plan, None)
+
+
+def apply_compaction_with_summary(
+    session: Session,
+    plan: CompactionPlan,
+    summary_text: str | None,
+) -> bool:
     if not plan.changed:
         session.metadata["prompt_token_estimate"] = str(plan.estimated_tokens)
         return False
-    summary_text = summarize_messages(plan.compacted_messages)
+    if not summary_text:
+        summary_text = summarize_messages(plan.compacted_messages)
     session.summary = SessionSummary(
         text=summary_text,
         compacted_message_count=len(plan.compacted_messages),
@@ -118,8 +127,9 @@ def maybe_compact(
     max_messages: int,
     keep_recent: int = 8,
     max_prompt_tokens: int = 12_000,
+    summary_text: str | None = None,
 ) -> bool:
-    return apply_compaction(
+    return apply_compaction_with_summary(
         session,
         plan_compaction(
             session,
@@ -127,6 +137,7 @@ def maybe_compact(
             keep_recent=keep_recent,
             max_prompt_tokens=max_prompt_tokens,
         ),
+        summary_text=summary_text,
     )
 
 

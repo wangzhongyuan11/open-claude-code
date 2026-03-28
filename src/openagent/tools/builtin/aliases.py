@@ -84,7 +84,13 @@ class TaskTool(BaseTool):
         self.subagent_manager = subagent_manager
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
-        result = self.subagent_manager.run(arguments["prompt"])
+        try:
+            result = self.subagent_manager.run(
+                arguments["prompt"],
+                agent_name=arguments.get("subagent_type", "general"),
+            )
+        except TypeError:
+            result = self.subagent_manager.run(arguments["prompt"])
         report = format_subagent_report(result)
         title = arguments.get("description") or "delegated task"
         task_id = arguments.get("task_id") or f"subagent:{hash(arguments['prompt']) & 0xFFFF_FFFF:x}"

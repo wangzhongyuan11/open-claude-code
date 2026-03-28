@@ -12,6 +12,7 @@ class Settings:
     log_root: Path
     provider_name: str = "anthropic"
     model: str = "claude-3-7-sonnet-latest"
+    default_agent: str = "build"
     base_url: str | None = None
     api_key: str | None = None
     bash_timeout_seconds: int = 30
@@ -25,6 +26,7 @@ class Settings:
         state_root = workspace_path / ".openagent"
         provider_name = os.getenv("OPENAGENT_PROVIDER", "anthropic")
         model = os.getenv("OPENAGENT_MODEL", "claude-3-7-sonnet-latest")
+        default_agent = os.getenv("OPENAGENT_DEFAULT_AGENT", "build")
         base_url = os.getenv("OPENAGENT_BASE_URL")
         api_key = None
         if provider_name == "volcengine":
@@ -42,6 +44,7 @@ class Settings:
             log_root=state_root / "logs",
             provider_name=provider_name,
             model=model,
+            default_agent=default_agent,
             base_url=base_url,
             api_key=api_key,
             bash_timeout_seconds=bash_timeout_seconds,

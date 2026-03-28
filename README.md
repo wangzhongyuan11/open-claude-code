@@ -82,8 +82,11 @@ chmod +x openagent.sh
 openagent --workspace .
 openagent --workspace . --list-sessions
 openagent --workspace . --session-id <session_id>
+openagent --workspace . --agents
+openagent --workspace . --agent plan
 openagent --workspace . --print-session
 openagent --workspace . --session-id <session_id> --status
+openagent --workspace . --session-id <session_id> --summary
 openagent --workspace . --session-id <session_id> --inspect
 openagent --workspace . --session-id <session_id> --replay
 openagent --workspace . --prompt "创建一个 demo.txt"
@@ -94,8 +97,10 @@ Interactive commands:
 
 - `/help`
 - `/session`
+- `/agents`
 - `/history`
 - `/status`
+- `/summary`
 - `/inspect`
 - `/replay`
 - `/compact`
@@ -105,6 +110,7 @@ Interactive commands:
 - `/todo add <text>`
 - `/todo done <index>`
 - `/todo clear`
+- `/agent <name>`
 - `/end`
 - `/cancel`
 - `/exit`
@@ -122,10 +128,14 @@ Interactive command reference:
   - prints the built-in REPL help text
 - `/session`
   - prints the current session id
+- `/agents`
+  - prints the visible agent list and marks the active agent
 - `/history`
   - prints the persisted message history in stored order
 - `/status`
   - prints the structured session/runtime status JSON
+- `/summary`
+  - prints a hidden-agent PR-style summary of the current conversation
 - `/inspect`
   - prints a structured JSON view of recent messages, parts, and metadata
 - `/replay`
@@ -145,6 +155,8 @@ Interactive command reference:
   - marks a todo item as completed using a 1-based index from `/todos`
 - `/todo clear`
   - removes all todo items from the current session
+- `/agent <name>`
+  - switches the active primary agent for the current session, for example `build` or `plan`
 - `/cancel`
   - discards the current multiline input buffer before submission
 - `/end`
@@ -238,6 +250,60 @@ Session metadata also tracks recent runtime state, including:
 - `compaction_mode`
 
 Persisted message parts now cover more operational and artifact cases:
+
+## Agent System
+
+The runtime now has an explicit opencode-inspired agent layer rather than a single hard-coded main prompt.
+
+- `agent/profile.py`
+  - defines `AgentProfile`, including `mode`, `hidden`, `steps`, model overrides, and tool visibility
+- `agent/registry.py`
+  - registers built-in agents and selects the default visible primary agent
+- `agent/prompts.py`
+  - stores the base coding prompt and agent-specific prompt overlays
+- `agent/runtime.py`
+  - binds the active agent profile to provider selection, system prompt construction, and visible tools
+- `agent/subagent.py`
+  - runs delegated work under a chosen subagent profile instead of one fixed subagent prompt
+
+Built-in agents:
+
+- `build`
+  - default primary coding agent with the full toolset
+- `plan`
+  - primary planning agent that can inspect the repository and manage todos but must not edit files
+- `general`
+  - focused subagent for delegated implementation or investigation work
+- `explore`
+  - read-only exploration subagent optimized for codebase search
+- `title`
+  - hidden agent used to generate a session title
+- `summary`
+  - hidden agent used to generate a PR-style conversation summary
+- `compaction`
+  - hidden agent used to generate compaction summaries for long sessions
+
+How agent selection works:
+
+- the active primary agent is stored in `session.metadata["active_agent"]`
+- `--agent <name>` starts a runtime with that primary agent
+- `/agent <name>` switches the active primary agent inside the current session
+- hidden agents are not user-selectable and are invoked internally by the runtime
+
+How hidden agents are used:
+
+- the first user turn can trigger the hidden `title` agent to create a better session title
+- compaction can call the hidden `compaction` agent before falling back to deterministic summarization
+- `/summary` invokes the hidden `summary` agent before falling back to the local summary implementation
+
+Real validation chain for the current agent system:
+
+- listed visible agents with `/agents`
+- ran a `build` turn and confirmed normal tool-capable behavior
+- switched to `plan` and confirmed the agent refused a requested file creation instead of editing the workspace
+- switched back to `build`
+- used `task` with `subagent_type=explore` to locate `active_agent` references in [`runtime.py`](/root/open-claude-code/src/openagent/agent/runtime.py)
+- confirmed `--status` reflects the persisted `active_agent` for the session
 
 - `text`: normal assistant text
 - `reasoning`: internal reasoning notes when present

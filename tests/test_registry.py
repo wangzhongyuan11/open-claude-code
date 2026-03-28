@@ -70,3 +70,14 @@ def test_registry_truncates_large_results_and_emits_lifecycle_events(tmp_path):
     event_types = [line["type"] for line in lines]
     assert event_types[:2] == ["tool.pending", "tool.running"]
     assert "tool.succeeded" in event_types
+
+
+def test_registry_returns_structured_failure_for_unknown_tool(tmp_path):
+    registry = ToolRegistry()
+
+    result = registry.invoke("missing_tool", {}, ToolContext(workspace=tmp_path))
+
+    assert result.is_error is True
+    assert result.error is not None
+    assert result.error.type == "unknown_tool"
+    assert "unknown tool" in result.content

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from openagent.domain.messages import Message
 from openagent.domain.session import Session
-from openagent.session.compaction import apply_compaction, maybe_compact, plan_compaction
+from openagent.session.compaction import apply_compaction_with_summary, maybe_compact, plan_compaction
 from openagent.session.prompt import PromptContext, build_prompt_context
 from openagent.session.retry import build_retry_message, retry_delay
 from openagent.session.revert import revert_last_turn
@@ -25,6 +26,8 @@ class SessionManager:
         self.max_messages_before_compact = max_messages_before_compact
         self.prompt_recent_messages = prompt_recent_messages
         self.prompt_max_tokens = prompt_max_tokens
+        self.title_generator: Callable[[Session, str], str | None] | None = None
+        self.compaction_summarizer: Callable[[Session, list[Message]], str | None] | None = None
 
     def start(self, workspace: Path, session_id: str | None = None) -> Session:
         if session_id:
@@ -38,7 +41,7 @@ class SessionManager:
         if mark_running_state and message.role == "user":
             mark_running(session, message.content)
         self._normalize_message(session, message)
-        self._ensure_title(session, message)
+        self._assign_title(session, message)
         session.messages.append(message)
         session.touch()
         self.store.save(session)
@@ -67,7 +70,10 @@ class SessionManager:
             keep_recent=self.prompt_recent_messages,
             max_prompt_tokens=self.prompt_max_tokens,
         )
-        apply_compaction(session, plan)
+        summary_text = None
+        if plan.changed and self.compaction_summarizer is not None:
+            summary_text = self.compaction_summarizer(session, plan.compacted_messages)
+        apply_compaction_with_summary(session, plan, summary_text)
         prompt_context = build_prompt_context(session, system_prompt, plan)
         prompt_notes = plan_to_prompt_notes(plan) + prompt_context.notes
         session.metadata["last_prompt_notes"] = "|".join(prompt_notes)
@@ -78,11 +84,21 @@ class SessionManager:
         return prompt_context
 
     def compact(self, session: Session) -> bool:
+        summary_text = None
+        plan = plan_compaction(
+            session,
+            self.max_messages_before_compact,
+            keep_recent=self.prompt_recent_messages,
+            max_prompt_tokens=self.prompt_max_tokens,
+        )
+        if plan.changed and self.compaction_summarizer is not None:
+            summary_text = self.compaction_summarizer(session, plan.compacted_messages)
         changed = maybe_compact(
             session,
             self.max_messages_before_compact,
             keep_recent=self.prompt_recent_messages,
             max_prompt_tokens=self.prompt_max_tokens,
+            summary_text=summary_text,
         )
         self.store.save(session)
         return changed
@@ -133,6 +149,15 @@ class SessionManager:
     def list_sessions(self) -> list[Session]:
         return self.store.list_sessions()
 
+    def set_title_generator(self, generator: Callable[[Session, str], str | None] | None) -> None:
+        self.title_generator = generator
+
+    def set_compaction_summarizer(
+        self,
+        summarizer: Callable[[Session, list[Message]], str | None] | None,
+    ) -> None:
+        self.compaction_summarizer = summarizer
+
     @staticmethod
     def _normalize_message(session: Session, message: Message) -> None:
         if message.session_id is None:
@@ -140,11 +165,14 @@ class SessionManager:
         if message.agent is None and message.role in {"user", "assistant"}:
             message.agent = "main"
 
-    @staticmethod
-    def _ensure_title(session: Session, message: Message) -> None:
+    def _assign_title(self, session: Session, message: Message) -> None:
         if session.title or message.role != "user":
             return
-        title = message.content.strip().replace("\n", " ")
+        title: str | None = None
+        if self.title_generator is not None:
+            title = self.title_generator(session, message.content)
+        if not title:
+            title = message.content.strip().replace("\n", " ")
         session.title = (title[:77] + "...") if len(title) > 80 else title
 
     @staticmethod

@@ -84,8 +84,8 @@ class ToolRegistry:
             self._emit_result(context, name, result, started)
             return result
 
-        tool = self.get(name)
         try:
+            tool = self.get(name)
             tool.init(context)
             tool.validate_arguments(arguments)
             self._emit(
@@ -110,6 +110,14 @@ class ToolRegistry:
                 tool_id=tool.id,
                 workspace=context.workspace,
                 limits=tool.get_output_limits(),
+            )
+        except KeyError as exc:
+            result = ToolExecutionResult.failure(
+                str(exc),
+                error_type="unknown_tool",
+                retryable=False,
+                hint="Choose one of the currently visible tools for this agent mode.",
+                metadata={"tool": name},
             )
         except Exception as exc:
             tb = traceback.format_exc()

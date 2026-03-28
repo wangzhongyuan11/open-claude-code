@@ -11,8 +11,10 @@ from openagent.session.todo import render_todos
 SHELL_COMMANDS = {
     "/help",
     "/session",
+    "/agents",
     "/history",
     "/status",
+    "/summary",
     "/inspect",
     "/replay",
     "/compact",
@@ -24,8 +26,10 @@ SHELL_COMMANDS = {
 HELP_TEXT = """Available interactive commands:
 /help                     Show this help text
 /session                  Print the current session id
+/agents                   List visible agents and show the active one
 /history                  Print persisted message history
 /status                   Print structured session/runtime status
+/summary                  Print a PR-style conversation summary
 /inspect                  Print a structured JSON inspect view
 /replay                   Print a turn-by-turn replay view
 /compact                  Force a compaction pass if needed
@@ -35,6 +39,7 @@ HELP_TEXT = """Available interactive commands:
 /todo add <text>          Add a todo item (priority defaults to medium)
 /todo done <index>        Mark a todo as completed (1-based index)
 /todo clear               Remove all todo items
+/agent <name>             Switch the active primary agent
 /cancel                   Discard the current multiline input buffer
 /end                      Submit the current multiline input buffer
 /exit                     Exit the REPL"""
@@ -44,9 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Minimal coding agent CLI")
     parser.add_argument("--workspace", default=".", help="Workspace root")
     parser.add_argument("--session-id", default=None, help="Resume an existing session")
+    parser.add_argument("--agent", default=None, help="Select the active primary agent")
+    parser.add_argument("--agents", action="store_true", help="List visible agents and exit")
     parser.add_argument("--list-sessions", action="store_true", help="List local sessions and exit")
     parser.add_argument("--print-session", action="store_true", help="Print the current session id and exit")
     parser.add_argument("--status", action="store_true", help="Print session status and exit")
+    parser.add_argument("--summary", action="store_true", help="Print a PR-style conversation summary and exit")
     parser.add_argument("--inspect", action="store_true", help="Print a structured session inspection view and exit")
     parser.add_argument("--replay", action="store_true", help="Print a turn-by-turn session replay view and exit")
     parser.add_argument("--prompt", default=None, help="Run one prompt and exit")
@@ -117,7 +125,7 @@ def _read_repl_input() -> tuple[str, str] | None:
                 continue
             if stripped in {"/exit", "exit", "quit"}:
                 return ("command", "/exit")
-            if stripped in SHELL_COMMANDS or stripped.startswith("/todo "):
+            if stripped in SHELL_COMMANDS or stripped.startswith("/todo ") or stripped.startswith("/agent "):
                 return ("command", stripped)
         if stripped == "/cancel":
             print("[cancelled]")
@@ -146,6 +154,7 @@ def main() -> None:
     runtime = build_default_runtime(
         workspace=args.workspace,
         session_id=args.session_id,
+        agent_name=args.agent,
     )
     runtime.set_question_handler(_question_handler)
 
@@ -155,6 +164,14 @@ def main() -> None:
 
     if args.status:
         print(runtime.status_report())
+        return
+
+    if args.agents:
+        print(runtime.list_agents())
+        return
+
+    if args.summary:
+        print(runtime.conversation_summary())
         return
 
     if args.inspect:
@@ -186,12 +203,18 @@ def main() -> None:
         if item_type == "command" and user_input == "/session":
             print(runtime.session_id)
             continue
+        if item_type == "command" and user_input == "/agents":
+            print(runtime.list_agents())
+            continue
         if item_type == "command" and user_input == "/history":
             for message in runtime.session.messages:
                 print(f"[{message.role}] {message.content}")
             continue
         if item_type == "command" and user_input == "/status":
             print(runtime.status_report())
+            continue
+        if item_type == "command" and user_input == "/summary":
+            print(runtime.conversation_summary())
             continue
         if item_type == "command" and user_input == "/inspect":
             print(runtime.inspect_session())
@@ -223,6 +246,13 @@ def main() -> None:
                 print(runtime.clear_todos())
                 continue
             print("Usage: /todo add <text> | /todo done <index> | /todo clear")
+            continue
+        if item_type == "command" and user_input.startswith("/agent "):
+            parts = shlex.split(user_input)
+            if len(parts) == 2:
+                print(runtime.switch_agent(parts[1]))
+                continue
+            print("Usage: /agent <name>")
             continue
         try:
             if args.stream:

@@ -6,10 +6,13 @@ import time
 from typing import Any, Callable
 
 from openagent.agent.loop import AgentLoop
+from openagent.agent.profile import AgentProfile
+from openagent.agent.prompts import PROMPT_BUILD, compose_agent_prompt
+from openagent.agent.registry import AgentRegistry, build_agent_registry
 from openagent.agent.subagent import SubagentManager
 from openagent.config.settings import Settings
 from openagent.domain.events import Event
-from openagent.domain.messages import Message
+from openagent.domain.messages import Message, MessageError, ModelRef, TokenUsage
 from openagent.domain.session import Session
 from openagent.domain.tools import ToolContext
 from openagent.events.bus import EventBus
@@ -20,6 +23,8 @@ from openagent.session.manager import SessionManager
 from openagent.session.background import BackgroundTaskManager
 from openagent.session.inspect import format_session_inspect, format_session_replay
 from openagent.session.status import status_payload
+from openagent.session.summary import summarize_messages
+from openagent.session.system import build_system_prompt
 from openagent.session.store import SessionStore
 from openagent.session.task_validation import (
     looks_multistep,
@@ -39,23 +44,7 @@ from openagent.tools.builtin.web import WebFetchTool, WebSearchTool
 from openagent.tools.registry import ToolRegistry
 
 
-DEFAULT_SYSTEM_PROMPT = """You are a Python coding agent working in a local repository.
-Use tools when needed.
-Prefer reading files before editing them.
-Prefer dedicated tools (`ls`, `glob`, `grep`, `codesearch`, `read_file`, `read_file_range`, `read_symbol`, `ensure_dir`, `write_file`, `append_file`, `edit_file`, `replace_all`, `insert_text`, `apply_patch`) over `bash` whenever they are sufficient for the task.
-You also have opencode-style aliases (`read`, `write`, `edit`, `patch`, `task`, `todowrite`, `todoread`, `question`, `skill`, `lsp`, `codesearch`, `batch`, `webfetch`, `websearch`) that should be used deliberately when they better match the user's request.
-For plain workspace file reads, use `read_file`, `read_file_range`, or `read_symbol` instead of `bash`.
-For directory inspection, use `ls` or `glob` instead of `bash`.
-For directory creation, use `ensure_dir` instead of `bash mkdir -p`.
-For repository text search, use `grep` instead of `bash`.
-Reserve `bash` for shell-native tasks such as running commands, not for ordinary file reads, code searches, or simple file edits when a dedicated tool exists.
-Keep changes precise and minimal.
-If the user asks you to read, create, edit, append, list, inspect, or execute something in the workspace, you must use the appropriate tool rather than claiming success from reasoning alone.
-Never claim a file was created, edited, appended, or read unless you actually obtained a tool result that proves it.
-Never claim a command was executed unless you actually obtained a bash tool result.
-When a user asks for exact file contents or exact command output, return the actual tool result rather than a summary.
-Avoid noisy listings of .git, .openagent, __pycache__, and test cache directories unless the user explicitly asks for them.
-Treat delegate tool results as authoritative completion reports. If a delegate result already includes verified paths, do not re-read those files unless the user explicitly asks you to inspect the contents yourself."""
+DEFAULT_SYSTEM_PROMPT = PROMPT_BUILD
 
 TOOL_ENFORCEMENT_SUFFIX = """
 Tool enforcement:
@@ -83,37 +72,51 @@ class AgentRuntime:
         session: Session,
         settings: Settings,
         event_bus: EventBus | None = None,
-        provider_factory: Callable[[], BaseProvider] | None = None,
-        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        provider_factory: Callable[[AgentProfile | str | None], BaseProvider] | None = None,
+        agent_registry: AgentRegistry | None = None,
+        agent_name: str | None = None,
     ) -> None:
-        self.provider = provider
         self.workspace = workspace.resolve()
         self.session_manager = session_manager
         self.session = session
         self.settings = settings
         self.event_bus = event_bus
-        self.provider_factory = provider_factory or (lambda: self.provider)
-        self.system_prompt = system_prompt
+        self.agent_registry = agent_registry or build_agent_registry(settings)
+        requested_agent = agent_name or session.metadata.get("active_agent") or self.agent_registry.default_primary().name
+        self.agent_profile = self.agent_registry.get(requested_agent)
+        self.hidden_agents_enabled = provider_factory is not None
+        self.provider_factory = provider_factory or (lambda profile=None: provider)
+        self.provider = provider
         self.question_handler: Callable[[list[dict[str, Any]]], list[str]] | None = None
         self.background_tasks = BackgroundTaskManager(
             store=self.session_manager.store,
             workspace=self.workspace,
             event_bus=self.event_bus,
         )
+        self.session.metadata["active_agent"] = self.agent_profile.name
+        self.session.touch()
+        self.session_manager.store.save(self.session)
+        if self.hidden_agents_enabled:
+            self.session_manager.set_title_generator(self._generate_session_title)
+            self.session_manager.set_compaction_summarizer(self._generate_compaction_summary)
         self.subagent_manager = self._build_subagent_manager()
-        self.registry = self._build_registry()
+        self.registry = self._build_registry_for_profile(self.agent_profile)
         self.loop = AgentLoop(
             provider=self.provider,
             tool_registry=self.registry,
             tool_context=ToolContext(
                 workspace=self.workspace,
                 session_id=self.session.id,
-                agent_name="main",
+                agent_name=self.agent_profile.name,
                 event_bus=self.event_bus,
-                runtime_state=self._tool_runtime_state("main"),
+                runtime_state=self._tool_runtime_state(self.agent_profile.name),
             ),
             event_bus=self.event_bus,
         )
+
+    @property
+    def system_prompt(self) -> str:
+        return self._system_prompt_for(self.agent_profile)
 
     def run_turn(
         self,
@@ -127,7 +130,7 @@ class AgentRuntime:
             Message(role="user", content=user_text),
             mark_running_state=True,
         )
-        prompt_context = self.session_manager.build_prompt(self.session, self.system_prompt)
+        prompt_context = self.session_manager.build_prompt(self.session, self._system_prompt_for(self.agent_profile))
         try:
             result = self.loop.run_result(
                 messages=prompt_context.messages,
@@ -188,6 +191,7 @@ class AgentRuntime:
         payload = {
             "session_id": self.session.id,
             "title": self.session.title,
+            "active_agent": self.agent_profile.name,
             **status_payload(self.session),
             "summary_present": self.session.summary is not None,
             "compacted_message_count": self.session.summary.compacted_message_count if self.session.summary else 0,
@@ -211,6 +215,48 @@ class AgentRuntime:
     def replay_session(self) -> str:
         self._refresh_session()
         return format_session_replay(self.session)
+
+    def list_agents(self, include_hidden: bool = False) -> str:
+        payload = [
+            {
+                "name": profile.name,
+                "description": profile.description,
+                "mode": profile.mode,
+                "hidden": profile.hidden,
+                "steps": profile.steps,
+                "active": profile.name == self.agent_profile.name,
+            }
+            for profile in self.agent_registry.list(include_hidden=include_hidden)
+        ]
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def switch_agent(self, name: str) -> str:
+        profile = self.agent_registry.get(name)
+        if not profile.supports_primary():
+            return f"Agent `{name}` is not a visible primary agent."
+        self.agent_profile = profile
+        self.session.metadata["active_agent"] = profile.name
+        self.session.touch()
+        self.session_manager.store.save(self.session)
+        self.provider = self.provider_factory(profile)
+        self.registry = self._build_registry_for_profile(profile)
+        self.loop = AgentLoop(
+            provider=self.provider,
+            tool_registry=self.registry,
+            tool_context=ToolContext(
+                workspace=self.workspace,
+                session_id=self.session.id,
+                agent_name=profile.name,
+                event_bus=self.event_bus,
+                runtime_state=self._tool_runtime_state(profile.name),
+            ),
+            event_bus=self.event_bus,
+        )
+        return f"Switched active agent to `{profile.name}`."
+
+    def conversation_summary(self) -> str:
+        self._refresh_session()
+        return self._generate_pr_summary(self.session.messages)
 
     def compact_session(self) -> str:
         changed = self.session_manager.compact(self.session)
@@ -247,14 +293,15 @@ class AgentRuntime:
 
     def set_question_handler(self, handler: Callable[[list[dict[str, Any]]], list[str]] | None) -> None:
         self.question_handler = handler
-        self.loop.tool_context.runtime_state = self._tool_runtime_state("main")
+        self.loop.tool_context.runtime_state = self._tool_runtime_state(self.agent_profile.name)
 
     def _build_subagent_manager(self) -> SubagentManager:
         return SubagentManager(
             provider_factory=self.provider_factory,
             registry_factory=self._build_subagent_registry,
             workspace=self.workspace,
-            system_prompt="You are a focused coding subagent. Investigate or make a small targeted change, then summarize clearly.",
+            prompt_factory=self._system_prompt_for_agent_name,
+            profile_lookup=self.agent_registry.get,
             event_bus=self.event_bus,
         )
 
@@ -294,37 +341,21 @@ class AgentRuntime:
         registry.register(TaskTool(self.subagent_manager))
         return registry
 
-    def _build_subagent_registry(self) -> ToolRegistry:
-        registry = ToolRegistry()
-        registry.register(ReadFileTool())
-        registry.register(ReadFileRangeTool())
-        registry.register(ReadTool())
-        registry.register(BackgroundTaskTool(self.background_tasks))
-        registry.register(EnsureDirTool())
-        registry.register(WriteFileTool())
-        registry.register(WriteTool())
-        registry.register(AppendFileTool())
-        registry.register(EditFileTool())
-        registry.register(ReplaceAllTool())
-        registry.register(InsertTextTool())
-        registry.register(EditTool())
-        registry.register(MultiEditTool())
-        registry.register(ApplyPatchTool())
-        registry.register(PatchTool())
-        registry.register(ListFilesTool())
-        registry.register(LsTool())
-        registry.register(GlobTool())
-        registry.register(GrepTool())
-        registry.register(CodeSearchTool())
-        registry.register(ReadSymbolTool())
-        registry.register(WebFetchTool())
-        registry.register(WebSearchTool())
-        registry.register(SkillTool())
-        registry.register(LspTool())
-        registry.register(BatchTool())
-        registry.register(TodoReadTool())
-        registry.register(BashTool(timeout_seconds=self.settings.bash_timeout_seconds))
-        return registry
+    def _build_registry_for_profile(self, profile: AgentProfile) -> ToolRegistry:
+        registry = self._build_registry()
+        if profile.allowed_tools is None:
+            return registry
+        filtered = ToolRegistry()
+        for name in profile.allowed_tools:
+            try:
+                filtered.register(registry.get(name))
+            except KeyError:
+                continue
+        return filtered
+
+    def _build_subagent_registry(self, agent_name: str) -> ToolRegistry:
+        profile = self.agent_registry.get(agent_name)
+        return self._build_registry_for_profile(profile)
 
     def _tool_runtime_state(self, agent_name: str) -> dict[str, Any]:
         return {
@@ -338,12 +369,17 @@ class AgentRuntime:
             "ask_questions": self.question_handler,
             "skill_roots": self._skill_roots(),
             "agent_name": agent_name,
+            "active_agent": self.agent_profile.name,
+            "agent_registry": self.agent_registry,
         }
 
     def _refresh_session(self) -> None:
         self.session = self.session_manager.store.load(self.session.id)
         self.loop.tool_context.session_id = self.session.id
-        self.loop.tool_context.runtime_state = self._tool_runtime_state(self.loop.tool_context.agent_name or "main")
+        active_name = self.session.metadata.get("active_agent") or self.agent_profile.name
+        self.agent_profile = self.agent_registry.get(active_name)
+        self.loop.tool_context.agent_name = self.agent_profile.name
+        self.loop.tool_context.runtime_state = self._tool_runtime_state(self.agent_profile.name)
 
     def _set_todos(self, todos: list) -> None:
         self.session.todos = todos
@@ -351,18 +387,80 @@ class AgentRuntime:
         self.session_manager.store.save(self.session)
 
     def _invoke_tool_from_runtime(self, tool_name: str, arguments: dict[str, Any], parent_context: ToolContext | None = None):
+        agent_name = parent_context.agent_name if parent_context else self.agent_profile.name
         context = ToolContext(
             workspace=self.workspace,
             session_id=self.session.id,
             message_id=parent_context.message_id if parent_context else None,
             tool_call_id=parent_context.tool_call_id if parent_context else None,
-            agent_name=parent_context.agent_name if parent_context else "main",
+            agent_name=agent_name,
             event_bus=self.event_bus,
-            runtime_state=self._tool_runtime_state(parent_context.agent_name if parent_context else "main"),
+            runtime_state=self._tool_runtime_state(agent_name),
         )
         if parent_context and parent_context.metadata:
             context.metadata.update(parent_context.metadata)
         return self.registry.invoke(tool_name, arguments, context)
+
+    def _system_prompt_for(self, profile: AgentProfile) -> str:
+        return build_system_prompt(self.session, compose_agent_prompt(profile))
+
+    def _system_prompt_for_agent_name(self, agent_name: str) -> str:
+        profile = self.agent_registry.get(agent_name)
+        return self._system_prompt_for(profile)
+
+    def _hidden_generate_text(
+        self,
+        agent_name: str,
+        user_text: str,
+        *,
+        session: Session | None = None,
+    ) -> str | None:
+        if not self.hidden_agents_enabled:
+            return None
+        profile = self.agent_registry.get(agent_name)
+        provider = self.provider_factory(profile)
+        target_session = session or self.session
+        response = provider.generate(
+            messages=[Message(role="user", content=user_text)],
+            tools=[],
+            system_prompt=build_system_prompt(target_session, compose_agent_prompt(profile)),
+        )
+        text = response.text.strip()
+        return text or None
+
+    def _generate_session_title(self, session: Session, user_text: str) -> str | None:
+        try:
+            title = self._hidden_generate_text("title", user_text, session=session)
+            if title:
+                return title.splitlines()[0].strip()[:50]
+        except Exception:
+            return None
+        return None
+
+    def _generate_compaction_summary(self, session: Session, messages: list[Message]) -> str | None:
+        if not messages:
+            return None
+        fallback = summarize_messages(messages)
+        prompt = (
+            "Summarize the following conversation context for continuation.\n\n"
+            + "\n\n".join(f"[{message.role}] {message.content}" for message in messages[-24:])
+        )
+        try:
+            summary = self._hidden_generate_text("compaction", prompt, session=session)
+            return summary or fallback
+        except Exception:
+            return fallback
+
+    def _generate_pr_summary(self, messages: list[Message]) -> str:
+        fallback = summarize_messages(messages)
+        prompt = "\n\n".join(f"[{message.role}] {message.content}" for message in messages[-32:])
+        try:
+            summary = self._hidden_generate_text("summary", prompt)
+            if summary and summary.strip().lower() != "ok":
+                return summary
+            return fallback
+        except Exception:
+            return fallback
 
     @staticmethod
     def _skill_roots() -> list[str]:
@@ -468,16 +566,26 @@ def build_default_runtime(
     workspace: str | Path = ".",
     session_id: str | None = None,
     session_root: str | Path | None = None,
+    agent_name: str | None = None,
 ) -> AgentRuntime:
     settings = Settings.from_workspace(workspace)
     workspace_path = settings.workspace
     manager = build_session_manager(workspace=workspace_path, session_root=session_root or settings.session_root)
     session = manager.start(workspace=workspace_path, session_id=session_id)
     event_bus = EventBus(settings.log_root / f"{session.id}.jsonl")
-    def provider_factory() -> BaseProvider:
-        return build_provider(settings)
+    agent_registry = build_agent_registry(settings)
 
-    provider = provider_factory()
+    def provider_factory(profile: AgentProfile | str | None = None) -> BaseProvider:
+        if isinstance(profile, str):
+            profile = agent_registry.get(profile)
+        return build_provider(settings, model_override=profile.model if profile else None)
+
+    active_profile = agent_registry.get(
+        agent_name
+        or session.metadata.get("active_agent")
+        or agent_registry.default_primary().name
+    )
+    provider = provider_factory(active_profile)
     return AgentRuntime(
         provider=provider,
         workspace=workspace_path,
@@ -486,6 +594,8 @@ def build_default_runtime(
         settings=settings,
         event_bus=event_bus,
         provider_factory=provider_factory,
+        agent_registry=agent_registry,
+        agent_name=active_profile.name,
     )
 
 
