@@ -165,6 +165,13 @@ The processor also contains session-level completion heuristics for common tool-
 - edit tasks can stop once the requested replacement is already satisfied
 - delegate tasks can stop directly on an authoritative subagent report when the user explicitly asks for the result
 
+For numbered multi-step checklist requests, the runtime now performs a final-state validation pass before accepting an assistant `stop`:
+
+- parses required directories, files, replacements, and final summary conditions from the user checklist
+- validates the actual workspace state instead of trusting a premature textual success claim
+- re-enters the loop with a continuation prompt when unfinished requirements remain
+- only accepts the turn once the final file states and required closing summary are satisfied
+
 The runtime prompt is assembled from:
 
 - base system prompt
@@ -212,6 +219,7 @@ See [`SESSION_TEST_TASKS.md`](./SESSION_TEST_TASKS.md) for a concrete prompt-by-
 - native provider streaming and CLI live output
 - status / retry / revert / todo helpers
 - patch / snapshot / compaction / retry parts
+- end-to-end numbered checklist tasks with continuation after premature assistant stop
 
 ## Work Log
 

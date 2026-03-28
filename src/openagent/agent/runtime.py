@@ -20,6 +20,11 @@ from openagent.session.manager import SessionManager
 from openagent.session.inspect import format_session_inspect, format_session_replay
 from openagent.session.status import status_payload
 from openagent.session.store import SessionStore
+from openagent.session.task_validation import (
+    looks_multistep,
+    parse_multistep_requirements,
+    validate_multistep_requirements,
+)
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.delegate import DelegateTool
 from openagent.tools.builtin.edit import EditFileTool
@@ -44,6 +49,13 @@ Tool enforcement:
 - This user request requires at least one real tool call before you can answer.
 - If you do not obtain a tool result, you must not claim the task was completed.
 - If a tool is unavailable or insufficient, say that explicitly instead of pretending the action succeeded.
+"""
+
+MULTISTEP_CONTINUATION_SUFFIX = """
+This is a multi-step request and you stopped too early.
+Continue executing the unfinished requirements in order.
+Do not repeat steps that are already complete.
+Only stop when every remaining requirement is finished and the final summary has been given.
 """
 
 logger = get_logger(__name__)
@@ -95,6 +107,14 @@ class AgentRuntime:
                 messages=prompt_context.messages,
                 system_prompt=prompt_context.system_prompt,
                 estimated_tokens=prompt_context.estimated_tokens,
+                stream_handler=stream_handler,
+            )
+            result = self._continue_multistep_if_needed(
+                user_text=user_text,
+                prompt_messages=prompt_context.messages,
+                system_prompt=prompt_context.system_prompt,
+                estimated_tokens=prompt_context.estimated_tokens,
+                result=result,
                 stream_handler=stream_handler,
             )
             if self._request_requires_tool(user_text) and result.tool_call_count == 0:
@@ -270,6 +290,51 @@ class AgentRuntime:
         result.history = history
         result.finish_reason = "other"
         return result
+
+    def _continue_multistep_if_needed(
+        self,
+        user_text: str,
+        prompt_messages: list[Message],
+        system_prompt: str,
+        estimated_tokens: int,
+        result,
+        stream_handler: Callable[[dict[str, Any]], None] | None,
+    ):
+        if not looks_multistep(user_text):
+            return result
+        requirements = parse_multistep_requirements(user_text)
+        max_rounds = 4
+        current = result
+        for _ in range(max_rounds):
+            final_reply = next((m.content for m in reversed(current.history) if m.role == "assistant"), "")
+            validation = validate_multistep_requirements(self.workspace, requirements, final_reply=final_reply)
+            if validation.complete:
+                return current
+            self._emit(
+                "runtime.multistep.continue",
+                {"session_id": self.session.id, "missing": validation.missing},
+            )
+            continuation_prompt = (
+                system_prompt
+                + "\n"
+                + MULTISTEP_CONTINUATION_SUFFIX
+                + "\nUnfinished requirements:\n- "
+                + "\n- ".join(validation.missing)
+            )
+            current = self.loop.run_result(
+                messages=current.history,
+                system_prompt=continuation_prompt,
+                estimated_tokens=estimated_tokens,
+                stream_handler=stream_handler,
+            )
+        final_reply = next((m.content for m in reversed(current.history) if m.role == "assistant"), "")
+        validation = validate_multistep_requirements(self.workspace, requirements, final_reply=final_reply)
+        if not validation.complete:
+            current = self._replace_unverified_result(
+                current,
+                "多步任务未完全完成，仍有未满足项：\n- " + "\n- ".join(validation.missing),
+            )
+        return current
 
 
 def build_default_runtime(

@@ -20,6 +20,9 @@ def detect_completion(
     content: str,
     metadata: dict[str, Any],
 ) -> TerminationDecision | None:
+    if _is_multistep_request(user_text):
+        return None
+
     if tool_name == "delegate":
         return _delegate_completion(user_text, content)
 
@@ -145,3 +148,7 @@ def _extract_replace_pair(user_text: str) -> tuple[str, str] | None:
 
 def _normalize_ws(text: str) -> str:
     return "\n".join(line.rstrip() for line in text.strip().splitlines())
+
+
+def _is_multistep_request(user_text: str) -> bool:
+    return len(re.findall(r"(?m)^\s*\d+\.\s+", user_text)) >= 2

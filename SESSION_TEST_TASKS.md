@@ -258,6 +258,80 @@ OPENAGENT_PROMPT_MAX_TOKENS=200
 - `--inspect` 的 tool message 中可看到 richer parts：
   - `tool`
   - `file`
+
+## 13. 多步 Checklist 任务不应提前结束
+
+输入：
+
+```text
+请完成下面这个多步任务，严格按顺序执行，并在最后给我一个简短总结：
+
+1. 创建目录 `work/demo_project`，以及子目录：
+   - `work/demo_project/docs`
+   - `work/demo_project/config`
+   - `work/demo_project/logs`
+
+2. 创建文件 `work/demo_project/docs/README.md`，内容为：
+
+# Demo Project
+
+这是一个用于测试 session、tool call、delegate、revert、retry 的示例项目。
+
+## Tasks
+- create files
+- read files
+- edit files
+- delegate subtask
+
+3. 创建文件 `work/demo_project/config/app.json`，内容为：
+
+{
+  "name": "demo_project",
+  "version": "1.0",
+  "mode": "test",
+  "features": ["session", "tools", "delegate"]
+}
+
+4. 创建文件 `work/demo_project/logs/run.log`，内容为：
+
+[INIT] demo project created
+[STATUS] pending verification
+
+5. 读取 `work/demo_project/docs/README.md`，并确认文件中是否包含 `delegate subtask` 这一行。
+
+6. 将 `work/demo_project/config/app.json` 中的 `"mode": "test"` 修改为 `"mode": "production"`。
+
+7. 将 `work/demo_project/logs/run.log` 中的第二行
+`[STATUS] pending verification`
+修改为
+`[STATUS] verified`
+
+8. 请把下面任务委托给子代理完成：
+   创建文件 `work/demo_project/docs/subtask_note.txt`，内容为：
+   `this file is created by delegated agent`
+
+9. 再次读取以下三个文件，并只检查最终内容是否符合预期：
+   - `work/demo_project/docs/README.md`
+   - `work/demo_project/config/app.json`
+   - `work/demo_project/logs/run.log`
+
+10. 最后直接告诉我：
+   - 哪些文件被创建了
+   - 哪些文件被修改了
+   - 子代理任务是否成功
+   - 如果都成功，就回复“任务全部完成”
+```
+
+理论预期：
+
+- 即使 assistant 在中途误判并给出 `finish=stop`，runtime 也不会直接接受
+- runtime 会根据最终文件状态继续推进剩余步骤
+- 最终应真实满足：
+  - `docs/README.md` 内容准确
+  - `config/app.json` 的 `mode` 为 `production`
+  - `logs/run.log` 第二行为 `[STATUS] verified`
+  - `docs/subtask_note.txt` 由子代理创建，内容精确匹配
+- 最终回复必须明确包含 `任务全部完成`
   - `patch`
   - `snapshot`
 

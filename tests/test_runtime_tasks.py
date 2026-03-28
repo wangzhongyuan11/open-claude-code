@@ -123,3 +123,178 @@ def test_runtime_task_delegate_to_subagent(tmp_path: Path):
 
     assert reply == "子代理任务已完成。"
     assert (tmp_path / "child.txt").read_text(encoding="utf-8") == "subagent"
+
+
+def test_runtime_continues_incomplete_multistep_request(tmp_path: Path):
+    class MultiStepProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="call-1",
+                            name="write_file",
+                            arguments={"path": "demo/README.md", "content": "hello"},
+                        )
+                    ],
+                    finish="tool-calls",
+                )
+            if self.calls == 2:
+                return AgentResponse(text="先停一下。", finish="stop")
+            if self.calls == 3:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="call-2",
+                            name="write_file",
+                            arguments={"path": "demo/app.json", "content": '{"mode": "production"}'},
+                        )
+                    ],
+                    finish="tool-calls",
+                )
+            return AgentResponse(text="任务全部完成", finish="stop")
+
+    runtime = build_runtime(tmp_path, MultiStepProvider())
+
+    reply = runtime.run_turn(
+        "1. 创建文件 `demo/README.md`，内容为：\n\nhello\n\n"
+        "2. 创建文件 `demo/app.json`，内容为：\n\n{\"mode\": \"production\"}\n\n"
+        "10. 最后直接告诉我：如果都成功，就回复“任务全部完成”"
+    )
+
+    assert (tmp_path / "demo" / "README.md").read_text(encoding="utf-8") == "hello"
+    assert (tmp_path / "demo" / "app.json").read_text(encoding="utf-8") == '{"mode": "production"}'
+    assert "任务全部完成" in reply or "已完成" in reply
+
+
+def test_runtime_completes_full_checklist_request_with_continuation_and_delegate(tmp_path: Path):
+    class ChecklistProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="call-1",
+                            name="bash",
+                            arguments={"command": f"mkdir -p {tmp_path / 'work/demo_project/docs'} {tmp_path / 'work/demo_project/config'} {tmp_path / 'work/demo_project/logs'}"},
+                        )
+                    ],
+                    finish="tool-calls",
+                )
+            if self.calls == 2:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="call-2",
+                            name="write_file",
+                            arguments={
+                                "path": "work/demo_project/docs/README.md",
+                                "content": "# Demo Project\n\n这是一个用于测试 session、tool call、delegate、revert、retry 的示例项目。\n\n## Tasks\n- create files\n- read files\n- edit files\n- delegate subtask",
+                            },
+                        )
+                    ],
+                    finish="tool-calls",
+                )
+            if self.calls == 3:
+                return AgentResponse(text="已完成前几步。", finish="stop")
+            if self.calls == 4:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="call-3",
+                            name="write_file",
+                            arguments={
+                                "path": "work/demo_project/config/app.json",
+                                "content": '{\n  "name": "demo_project",\n  "version": "1.0",\n  "mode": "production",\n  "features": ["session", "tools", "delegate"]\n}',
+                            },
+                        )
+                    ],
+                    finish="tool-calls",
+                )
+            if self.calls == 5:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="call-4",
+                            name="write_file",
+                            arguments={
+                                "path": "work/demo_project/logs/run.log",
+                                "content": "[INIT] demo project created\n[STATUS] verified\n",
+                            },
+                        )
+                    ],
+                    finish="tool-calls",
+                )
+            if self.calls == 6:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="call-5",
+                            name="delegate",
+                            arguments={"prompt": "创建文件 work/demo_project/docs/subtask_note.txt，内容为 this file is created by delegated agent"},
+                        )
+                    ],
+                    finish="tool-calls",
+                )
+            return AgentResponse(text="任务全部完成", finish="stop")
+
+    class ChecklistChildProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="child-1",
+                            name="write_file",
+                            arguments={
+                                "path": "work/demo_project/docs/subtask_note.txt",
+                                "content": "this file is created by delegated agent",
+                            },
+                        )
+                    ],
+                    finish="tool-calls",
+                )
+            return AgentResponse(text="子代理任务已完成。", finish="stop")
+
+    runtime = build_runtime(
+        tmp_path,
+        ChecklistProvider(),
+        provider_factory=ChecklistChildProvider,
+    )
+
+    reply = runtime.run_turn(
+        "1. 创建目录 `work/demo_project`，以及子目录：\n"
+        "   - `work/demo_project/docs`\n"
+        "   - `work/demo_project/config`\n"
+        "   - `work/demo_project/logs`\n\n"
+        "2. 创建文件 `work/demo_project/docs/README.md`，内容为：\n\n"
+        "# Demo Project\n\n"
+        "这是一个用于测试 session、tool call、delegate、revert、retry 的示例项目。\n\n"
+        "## Tasks\n- create files\n- read files\n- edit files\n- delegate subtask\n\n"
+        "3. 创建文件 `work/demo_project/config/app.json`，内容为：\n\n"
+        "{\n  \"name\": \"demo_project\",\n  \"version\": \"1.0\",\n  \"mode\": \"test\",\n  \"features\": [\"session\", \"tools\", \"delegate\"]\n}\n\n"
+        "4. 创建文件 `work/demo_project/logs/run.log`，内容为：\n\n"
+        "[INIT] demo project created\n[STATUS] pending verification\n\n"
+        "6. 将 `work/demo_project/config/app.json` 中的 `\"mode\": \"test\"` 修改为 `\"mode\": \"production\"`。\n\n"
+        "7. 将 `work/demo_project/logs/run.log` 中的第二行\n`[STATUS] pending verification`\n修改为\n`[STATUS] verified`\n\n"
+        "8. 请把下面任务委托给子代理完成：创建文件 `work/demo_project/docs/subtask_note.txt`，内容为：`this file is created by delegated agent`\n\n"
+        "10. 最后直接告诉我：如果都成功，就回复“任务全部完成”"
+    )
+
+    assert (tmp_path / "work/demo_project/docs/README.md").read_text(encoding="utf-8").rstrip().endswith("delegate subtask")
+    assert '"mode": "production"' in (tmp_path / "work/demo_project/config/app.json").read_text(encoding="utf-8")
+    assert (tmp_path / "work/demo_project/logs/run.log").read_text(encoding="utf-8") == "[INIT] demo project created\n[STATUS] verified\n"
+    assert (tmp_path / "work/demo_project/docs/subtask_note.txt").read_text(encoding="utf-8") == "this file is created by delegated agent"
+    assert "任务全部完成" in reply
