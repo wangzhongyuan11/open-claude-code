@@ -502,6 +502,8 @@ class AgentRuntime:
     def _looks_like_checklist_status_update(incoming: list, existing_auto: list) -> bool:
         if len(incoming) != len(existing_auto):
             return False
+        if len(incoming) >= 3:
+            return True
         for auto_todo, manual_todo in zip(existing_auto, incoming):
             auto_text = AgentRuntime._normalize_todo_text(auto_todo.content)
             manual_text = AgentRuntime._normalize_todo_text(manual_todo.content)

@@ -194,28 +194,14 @@ class SessionProcessor:
         validation = validate_multistep_requirements(self.tool_context.workspace, requirements)
         if not validation.complete:
             return None
-        if tool_name not in {"read_file", "read", "read_symbol"}:
+        if not self._is_verification_read_tool(tool_name, history):
             return None
         decision = self._build_multistep_completion_reply(last_user_text, history)
         return decision
 
     @staticmethod
     def _build_multistep_completion_reply(last_user_text: str, history: list[Message]):
-        tool_names: dict[str, str] = {}
-        for message in history:
-            if message.role == "assistant" and message.tool_calls:
-                for tool_call in message.tool_calls:
-                    tool_names[tool_call.id] = tool_call.name
-        read_results: list[str] = []
-        for message in reversed(history):
-            if message.role != "tool":
-                continue
-            if tool_names.get(message.tool_call_id) not in {"read_file", "read", "read_symbol"}:
-                continue
-            if message.content:
-                read_results.append(message.content.strip())
-            if len(read_results) >= 3:
-                break
+        read_results = SessionProcessor._collect_recent_read_results(history)
         if "只告诉我三件事" in last_user_text and len(read_results) >= 3:
             readme_text, config_text, subtask_text = list(reversed(read_results[:3]))
             lines = [
@@ -236,6 +222,57 @@ class SessionProcessor:
                 if content:
                     return TerminationDecision(True, content, "multistep-validated")
         return TerminationDecision(True, "任务全部完成", "multistep-validated")
+
+    @staticmethod
+    def _is_verification_read_tool(tool_name: str, history: list[Message]) -> bool:
+        if tool_name in {"read_file", "read", "read_symbol"}:
+            return True
+        if tool_name != "batch":
+            return False
+        for message in reversed(history):
+            if message.role != "tool" or not message.tool_call_id:
+                continue
+            parsed = SessionProcessor._parse_batch_results(message.content)
+            if not parsed:
+                return False
+            return all(item.get("tool") in {"read_file", "read", "read_symbol"} for item in parsed)
+        return False
+
+    @staticmethod
+    def _collect_recent_read_results(history: list[Message]) -> list[str]:
+        tool_names: dict[str, str] = {}
+        for message in history:
+            if message.role == "assistant" and message.tool_calls:
+                for tool_call in message.tool_calls:
+                    tool_names[tool_call.id] = tool_call.name
+        read_results: list[str] = []
+        for message in reversed(history):
+            if message.role != "tool":
+                continue
+            tool_name = tool_names.get(message.tool_call_id)
+            if tool_name in {"read_file", "read", "read_symbol"}:
+                if message.content:
+                    read_results.append(message.content.strip())
+            elif tool_name == "batch":
+                for item in reversed(SessionProcessor._parse_batch_results(message.content)):
+                    if item.get("tool") not in {"read_file", "read", "read_symbol"}:
+                        continue
+                    output = str(item.get("output", "")).strip()
+                    if output:
+                        read_results.append(output)
+            if len(read_results) >= 3:
+                break
+        return read_results
+
+    @staticmethod
+    def _parse_batch_results(content: str) -> list[dict[str, Any]]:
+        try:
+            payload = json.loads(content)
+        except (TypeError, json.JSONDecodeError):
+            return []
+        if not isinstance(payload, list):
+            return []
+        return [item for item in payload if isinstance(item, dict)]
 
     @staticmethod
     def _call_fingerprint(name: str, arguments: dict) -> str:

@@ -27,6 +27,7 @@ def normalize_subagent_name(agent_name: str | None) -> str:
     if not normalized:
         return "general"
     aliases = {
+        "generic": "general",
         "default": "general",
         "code": "general",
         "coding": "general",

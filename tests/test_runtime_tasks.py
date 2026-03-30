@@ -417,6 +417,17 @@ def test_parse_multistep_supports_create_this_file_reference():
     assert requirements.final_files["work/audit_demo/does_not_exist.txt"] == "recovered"
 
 
+def test_parse_multistep_supports_inline_create_file_without_colon():
+    prompt = (
+        "1. 创建文件 `work/demo/config/app.json`，内容为：\n\n"
+        "{\n  \"mode\": \"production\"\n}\n\n"
+        "2. 请把下面任务委托给子代理完成：创建文件 `work/demo/output/subtask.txt`，内容为 `delegated-ok`。\n"
+    )
+    requirements = parse_multistep_requirements(prompt)
+    assert requirements.final_files["work/demo/config/app.json"] == '{\n  "mode": "production"\n}'
+    assert requirements.final_files["work/demo/output/subtask.txt"] == "delegated-ok"
+
+
 def test_request_requires_tool_ignores_planning_only_text():
     assert AgentRuntime._request_requires_tool("先分析最合理的修复方案，不要修改代码。只说明应改哪一行以及为什么。") is False
     assert AgentRuntime._request_requires_tool("请读取 README.md 并只说明前两行。") is True
@@ -458,3 +469,68 @@ def test_runtime_multistep_recovery_returns_final_content(tmp_path: Path):
         "4. 再次读取并只回复最终内容\n"
     )
     assert reply == "recovered"
+
+
+def test_runtime_stops_after_final_batch_verification_reads(tmp_path: Path):
+    class BatchChecklistProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(id="b1", name="batch", arguments={"calls": [
+                            {"tool": "ensure_dir", "arguments": {"path": "work/check/docs"}},
+                            {"tool": "ensure_dir", "arguments": {"path": "work/check/config"}},
+                            {"tool": "ensure_dir", "arguments": {"path": "work/check/output"}},
+                        ]})
+                    ],
+                    finish="tool-calls",
+                )
+            if self.calls == 2:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(id="b2", name="write_file", arguments={"path": "work/check/docs/README.md", "content": "# Checklist Demo\n\n- alpha\n- beta\n- delegate subtask"}),
+                        ToolCall(id="b3", name="write_file", arguments={"path": "work/check/config/app.json", "content": '{\n  \"mode\": \"test\",\n  \"name\": \"check\"\n}'}),
+                    ],
+                    finish="tool-calls",
+                )
+            if self.calls == 3:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(id="b4", name="edit_file", arguments={"path": "work/check/config/app.json", "old_text": '"mode": "test"', "new_text": '"mode": "production"'}),
+                        ToolCall(id="b5", name="write_file", arguments={"path": "work/check/output/subtask.txt", "content": "delegated-ok"}),
+                    ],
+                    finish="tool-calls",
+                )
+            if self.calls == 4:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(id="b6", name="batch", arguments={"calls": [
+                            {"tool": "read_file", "arguments": {"path": "work/check/docs/README.md"}},
+                            {"tool": "read_file", "arguments": {"path": "work/check/config/app.json"}},
+                            {"tool": "read_file", "arguments": {"path": "work/check/output/subtask.txt"}},
+                        ]})
+                    ],
+                    finish="tool-calls",
+                )
+            return AgentResponse(
+                tool_calls=[ToolCall(id="bad", name="write_file", arguments={"path": "work/check/config/app.json", "content": "broken"})],
+                finish="tool-calls",
+            )
+
+    runtime = build_runtime(tmp_path, BatchChecklistProvider())
+    reply = runtime.run_turn(
+        "1. 创建目录 `work/check/docs`、`work/check/config`、`work/check/output`。\n"
+        "2. 创建文件 `work/check/docs/README.md`，内容为：\n# Checklist Demo\n\n- alpha\n- beta\n- delegate subtask\n"
+        "3. 创建文件 `work/check/config/app.json`，内容为：\n{\n  \"mode\": \"test\",\n  \"name\": \"check\"\n}\n"
+        "4. 将 `work/check/config/app.json` 中的 `\"mode\": \"test\"` 修改为 `\"mode\": \"production\"`。\n"
+        "5. 请把下面任务委托给子代理完成：创建文件 `work/check/output/subtask.txt`，内容为 `delegated-ok`。\n"
+        "6. 最后读取这三个文件并只告诉我三件事：\n   - README 是否含 delegate subtask\n   - mode 是否为 production\n   - 子代理是否成功\n"
+    )
+    assert "README 是否含 delegate subtask：是" in reply
+    assert "mode 是否为 production：是" in reply
+    assert "子代理是否成功：是" in reply
+    assert (tmp_path / "work/check/config/app.json").read_text(encoding="utf-8") != "broken"

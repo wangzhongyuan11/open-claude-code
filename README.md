@@ -374,9 +374,11 @@ For numbered multi-step checklist requests, the runtime now performs a final-sta
 - validates the actual workspace state instead of trusting a premature textual success claim
 - re-enters the loop with a continuation prompt when unfinished requirements remain
 - stops cleanly after the final verification reads instead of drifting into extra tool loops
+- treats `batch` verification reads the same as individual `read_file` checks when deciding whether the checklist is truly complete
 - nudges the build agent to treat large numbered prompts as checklists and use `todowrite` / `task` deliberately when that helps preserve progress
 - for long numbered requests, the runtime now mirrors the parsed checklist into session todos so the active turn sees an explicit pending-step list instead of relying only on the raw prompt text
 - only accepts the turn once the final file states and required closing summary are satisfied
+- supports delegated inline file-creation steps such as “创建文件 ...，内容为 `delegated-ok`” without accidentally rebinding the content to the previous file in the checklist
 
 Todo notes:
 

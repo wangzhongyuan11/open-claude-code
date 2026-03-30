@@ -138,7 +138,7 @@ def _extract_declared_directories(block: str) -> list[str]:
 
 
 def _extract_create_file_blocks(block: str, default_path: str | None = None) -> list[tuple[str, str]]:
-    pattern = re.compile(r"创建文件\s+`([^`]+)`，内容为：\s*(.*)$", re.S)
+    pattern = re.compile(r"创建文件\s+`([^`]+)`，内容为(?:[:：])?\s*(.*)$", re.S)
     match = pattern.search(block)
     if match:
         path = match.group(1)
@@ -177,6 +177,9 @@ def _clean_block_content(text: str) -> str:
     cleaned = text.strip()
     if cleaned.startswith("`") and cleaned.endswith("`") and "\n" not in cleaned:
         return cleaned[1:-1]
+    quoted = re.match(r"^`([^`]+)`[。．.!！]?$", cleaned)
+    if quoted and "\n" not in cleaned:
+        return quoted.group(1)
     return cleaned
 
 
