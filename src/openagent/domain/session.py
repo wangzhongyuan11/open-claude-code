@@ -35,6 +35,8 @@ class SessionTodo:
     content: str
     status: str = "pending"
     priority: str = "medium"
+    source: str = "manual"
+    key: str | None = None
 
 
 @dataclass(slots=True)

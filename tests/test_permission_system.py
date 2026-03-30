@@ -9,6 +9,7 @@ from openagent.providers.base import BaseProvider
 from openagent.session.store import SessionStore
 from openagent.tools.builtin.files import ReadFileTool, WriteFileTool
 from openagent.tools.registry import ToolRegistry
+from openagent.extensions.base import ExtensionContext
 
 
 class ChildWriteProvider(BaseProvider):
@@ -150,3 +151,22 @@ def test_subagent_uses_same_session_permission_state(tmp_path: Path):
     session = store.load(session.id)
     assert session.permission["rules"]
     assert (tmp_path / "child.txt").exists()
+
+
+def test_todowrite_is_allowed_for_build_agent(tmp_path: Path):
+    store = SessionStore(tmp_path / ".openagent" / "sessions")
+    session = store.create(tmp_path, session_id="sess-1")
+    profile = AgentProfile(name="build")
+    policy = SessionPermissionPolicy(store, profile, yolo=False)
+    decision = policy.check(
+        ExtensionContext(
+            tool_name="todowrite",
+            arguments={"todos": [{"content": "verify"}]},
+            tool_context=ToolContext(
+                workspace=tmp_path,
+                session_id=session.id,
+                agent_name="build",
+            ),
+        )
+    )
+    assert decision.action == "allow"

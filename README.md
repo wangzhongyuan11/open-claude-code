@@ -249,7 +249,15 @@ For numbered multi-step checklist requests, the runtime now performs a final-sta
 - re-enters the loop with a continuation prompt when unfinished requirements remain
 - stops cleanly after the final verification reads instead of drifting into extra tool loops
 - nudges the build agent to treat large numbered prompts as checklists and use `todowrite` / `task` deliberately when that helps preserve progress
+- for long numbered requests, the runtime now mirrors the parsed checklist into session todos so the active turn sees an explicit pending-step list instead of relying only on the raw prompt text
 - only accepts the turn once the final file states and required closing summary are satisfied
+
+Todo notes:
+
+- manual todos created with `/todo` or `todowrite` are still just persisted task tracking; they do not auto-execute in the background
+- `todowrite` is treated as internal session-state maintenance for writable agents, so it does not trigger an extra approval prompt; readonly agents still deny it
+- long multi-step user messages can now populate `auto-checklist` todos to reduce forgetting within the same session and across resumed sessions
+- if the model also writes a parallel todo checklist, the runtime preserves the existing `auto-checklist` entries and merges matching status updates into them instead of replacing them
 
 The runtime prompt is assembled from:
 

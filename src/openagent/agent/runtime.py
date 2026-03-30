@@ -134,6 +134,7 @@ class AgentRuntime:
         stream_handler: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
         self._refresh_session()
+        checklist_requirements = parse_multistep_requirements(user_text) if looks_multistep(user_text) else None
         routing = decide_routing(self.agent_profile, user_text)
         if routing.action == "switch" and routing.target_agent:
             self._auto_switch_agent(routing)
@@ -145,6 +146,8 @@ class AgentRuntime:
             Message(role="user", content=user_text),
             mark_running_state=True,
         )
+        if checklist_requirements is not None and len(checklist_requirements.steps) >= 3:
+            self.session_manager.sync_checklist(self.session, checklist_requirements)
         prompt_context = self.session_manager.build_prompt(self.session, self._system_prompt_for(self.agent_profile))
         try:
             result = self.loop.run_result(
@@ -179,6 +182,8 @@ class AgentRuntime:
             new_messages = history[len(prompt_context.messages):]
             self._refresh_session()
             self.session_manager.append_turn_messages(self.session, new_messages)
+            if checklist_requirements is not None and len(checklist_requirements.steps) >= 3:
+                self.session_manager.sync_checklist_progress(self.session, checklist_requirements)
             self.session.metadata["last_finish_reason"] = result.finish_reason
             self.session.metadata["last_loop_unstable"] = "true" if result.unstable else "false"
             self.session.metadata["last_loop_steps"] = str(result.step_count)
@@ -194,6 +199,7 @@ class AgentRuntime:
             logger.info("Completed turn for session %s", self.session.id)
             return last_assistant
         except Exception as exc:
+            self._refresh_session()
             self.session_manager.fail_turn(self.session, str(exc))
             self._emit("loop.failed", {"session_id": self.session.id, "error": str(exc)})
             raise
@@ -476,9 +482,52 @@ class AgentRuntime:
         self.loop.tool_context.permission = dict(self.session.permission)
 
     def _set_todos(self, todos: list) -> None:
-        self.session.todos = todos
+        normalized_manual = []
+        for todo in todos:
+            todo.status = self._normalize_todo_status(getattr(todo, "status", "pending"))
+            normalized_manual.append(todo)
+        existing_auto = [todo for todo in self.session.todos if todo.source == "auto-checklist"]
+        if existing_auto and self._looks_like_checklist_status_update(normalized_manual, existing_auto):
+            for existing, incoming in zip(existing_auto, normalized_manual):
+                existing.status = incoming.status
+                if incoming.priority:
+                    existing.priority = incoming.priority
+            self.session.todos = [todo for todo in self.session.todos if todo.source != "auto-checklist"] + existing_auto
+        else:
+            self.session.todos = [todo for todo in self.session.todos if todo.source == "auto-checklist"] + normalized_manual
         self.session.touch()
         self.session_manager.store.save(self.session)
+
+    @staticmethod
+    def _looks_like_checklist_status_update(incoming: list, existing_auto: list) -> bool:
+        if len(incoming) != len(existing_auto):
+            return False
+        for auto_todo, manual_todo in zip(existing_auto, incoming):
+            auto_text = AgentRuntime._normalize_todo_text(auto_todo.content)
+            manual_text = AgentRuntime._normalize_todo_text(manual_todo.content)
+            if not auto_text or not manual_text:
+                return False
+            if auto_text == manual_text:
+                continue
+            if auto_text in manual_text or manual_text in auto_text:
+                continue
+            return False
+        return True
+
+    @staticmethod
+    def _normalize_todo_text(text: str) -> str:
+        normalized = (text or "").strip()
+        if normalized.startswith("[") and "]" in normalized:
+            normalized = normalized.split("]", 1)[1].strip()
+        normalized = normalized.replace("`", "")
+        return " ".join(normalized.split()).lower()
+
+    @staticmethod
+    def _normalize_todo_status(status: str) -> str:
+        normalized = (status or "pending").strip().lower()
+        if normalized in {"completed", "complete", "done", "finished"}:
+            return "completed"
+        return "pending"
 
     def _invoke_tool_from_runtime(self, tool_name: str, arguments: dict[str, Any], parent_context: ToolContext | None = None):
         agent_name = parent_context.agent_name if parent_context else self.agent_profile.name

@@ -152,7 +152,7 @@ class TodoWriteTool(BaseTool):
         todos = [
             SessionTodo(
                 content=item["content"],
-                status=item.get("status", "pending"),
+                status=_normalize_todo_status(item.get("status", "pending")),
                 priority=item.get("priority", "medium"),
             )
             for item in arguments["todos"]
@@ -189,3 +189,14 @@ class TodoReadTool(BaseTool):
                 hint="Use the interactive /todos command or run this tool in a runtime that exposes todo callbacks.",
             )
         return ToolExecutionResult.success(output, title=title, metadata={"has_todos": "true"})
+
+
+def _normalize_todo_status(status: str) -> str:
+    normalized = (status or "pending").strip().lower()
+    if normalized in {"completed", "complete", "done", "finished"}:
+        return "completed"
+    if normalized in {"in_progress", "in-progress", "doing", "working"}:
+        return "pending"
+    if normalized in {"pending", "todo", "open"}:
+        return "pending"
+    return "pending"

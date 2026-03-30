@@ -6,12 +6,23 @@ from pathlib import Path
 
 
 @dataclass(slots=True)
+class ChecklistStep:
+    number: int
+    text: str
+    directories: list[str] = field(default_factory=list)
+    created_files: dict[str, str] = field(default_factory=dict)
+    replacements: list[tuple[str, str, str]] = field(default_factory=list)
+    verification_only: bool = False
+
+
+@dataclass(slots=True)
 class MultiStepRequirements:
     directories: list[str] = field(default_factory=list)
     created_files: dict[str, str] = field(default_factory=dict)
     final_files: dict[str, str] = field(default_factory=dict)
     replacements: list[tuple[str, str, str]] = field(default_factory=list)
     requires_final_summary: bool = False
+    steps: list[ChecklistStep] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -28,16 +39,22 @@ def parse_multistep_requirements(user_text: str) -> MultiStepRequirements:
     req = MultiStepRequirements()
     step_blocks = _split_step_blocks(user_text)
     for number, block in step_blocks:
+        step = ChecklistStep(number=number, text=_step_text(block))
         if "创建目录" in block:
-            req.directories.extend(_extract_backtick_paths(block))
+            step.directories.extend(_extract_declared_directories(block))
+            req.directories.extend(step.directories)
         for path, content in _extract_create_file_blocks(block):
             cleaned = _clean_block_content(content)
+            step.created_files[path] = cleaned
             req.created_files[path] = cleaned
             req.final_files[path] = cleaned
         for path, old_text, new_text in _extract_replacements(block):
+            step.replacements.append((path, old_text, new_text))
             req.replacements.append((path, old_text, new_text))
             if path in req.final_files:
                 req.final_files[path] = req.final_files[path].replace(old_text, new_text, 1)
+        step.verification_only = "最后读取" in block or "最终内容" in block or "只告诉我" in block
+        req.steps.append(step)
     req.requires_final_summary = "最后直接告诉我" in user_text or "任务全部完成" in user_text
     req.directories = _dedupe(req.directories)
     return req
@@ -100,6 +117,20 @@ def _extract_backtick_paths(block: str) -> list[str]:
     return [item for item in re.findall(r"`([^`]+)`", block) if "/" in item]
 
 
+def _extract_declared_directories(block: str) -> list[str]:
+    results = _extract_backtick_paths(block)
+    parent_match = re.search(r"创建(?:目录)?\s+([A-Za-z0-9_./-]+)\s+及\s+(.+?)子目录", block, re.S)
+    if parent_match:
+        parent = parent_match.group(1).strip().rstrip("，。")
+        raw_children = parent_match.group(2)
+        children = re.findall(r"([A-Za-z0-9_.-]+)", raw_children)
+        for child in children:
+            if child in {"子目录"}:
+                continue
+            results.append(f"{parent}/{child}")
+    return _dedupe(results)
+
+
 def _extract_create_file_blocks(block: str) -> list[tuple[str, str]]:
     pattern = re.compile(r"创建文件\s+`([^`]+)`，内容为：\s*(.*)$", re.S)
     match = pattern.search(block)
@@ -148,3 +179,7 @@ def _dedupe(values: list[str]) -> list[str]:
         seen.add(value)
         result.append(value)
     return result
+
+
+def _step_text(block: str) -> str:
+    return re.sub(r"^\s*\d+\.\s*", "", block.strip(), flags=re.S)

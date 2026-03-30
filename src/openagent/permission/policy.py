@@ -26,6 +26,7 @@ READ_ONLY_TOOLS = {
     "codesearch",
     "read_symbol",
     "todoread",
+    "todowrite",
     "question",
     "skill",
     "lsp",
@@ -205,7 +206,7 @@ class SessionPermissionPolicy(PermissionPolicy):
 
         for tool in READ_ONLY_TOOLS | DELEGATE_TOOLS:
             rules.append(PermissionRule(agent=profile.name, permission=f"tool.{tool}", pattern="*", action="allow", source="agent-default"))
-        for tool in WRITE_TOOLS | SHELL_TOOLS | NETWORK_TOOLS | TODO_WRITE_TOOLS:
+        for tool in WRITE_TOOLS | SHELL_TOOLS | NETWORK_TOOLS:
             rules.append(PermissionRule(agent=profile.name, permission=f"tool.{tool}", pattern="*", action="ask", source="agent-default"))
         rules.append(PermissionRule(agent=profile.name, permission="tool.batch", pattern="*", action="ask", source="agent-default"))
         return rules

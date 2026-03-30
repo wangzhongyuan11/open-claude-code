@@ -11,7 +11,14 @@ from openagent.session.retry import build_retry_message, retry_delay
 from openagent.session.revert import revert_last_turn
 from openagent.session.status import increment_retry, mark_completed, mark_degraded, mark_running, recover_if_interrupted
 from openagent.session.store import SessionStore
-from openagent.session.todo import add_todo, clear_todos, mark_todo_done
+from openagent.session.task_validation import MultiStepRequirements
+from openagent.session.todo import (
+    add_todo,
+    clear_todos,
+    mark_todo_done,
+    sync_auto_checklist,
+    sync_auto_checklist_progress,
+)
 
 
 class SessionManager:
@@ -144,6 +151,14 @@ class SessionManager:
     def clear_todos(self, session: Session) -> None:
         clear_todos(session)
         session.touch()
+        self.store.save(session)
+
+    def sync_checklist(self, session: Session, requirements: MultiStepRequirements) -> None:
+        sync_auto_checklist(session, requirements)
+        self.store.save(session)
+
+    def sync_checklist_progress(self, session: Session, requirements: MultiStepRequirements) -> None:
+        sync_auto_checklist_progress(session, requirements)
         self.store.save(session)
 
     def list_sessions(self) -> list[Session]:

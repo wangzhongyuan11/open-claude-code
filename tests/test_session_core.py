@@ -53,6 +53,7 @@ def test_session_store_roundtrip_preserves_status_summary_and_todos(tmp_path: Pa
     assert loaded.status.state == "degraded"
     assert loaded.status.recovery_hint == "retry"
     assert loaded.todos[0].content == "repair session"
+    assert loaded.todos[0].source == "manual"
 
 
 def test_compaction_creates_summary_and_keeps_recent_messages(tmp_path: Path):

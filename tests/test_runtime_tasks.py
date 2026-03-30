@@ -360,3 +360,47 @@ def test_runtime_stops_after_final_multistep_verification_reads(tmp_path: Path):
     assert "README 是否含 delegate subtask：是" in reply
     assert "mode 是否为 production：是" in reply
     assert "子代理是否成功：是" in reply
+    assert any(todo.source == "auto-checklist" for todo in runtime.session.todos)
+    assert all(todo.status == "completed" for todo in runtime.session.todos if todo.source == "auto-checklist")
+
+
+def test_checklist_creation_step_remains_completed_after_later_edit(tmp_path: Path):
+    from openagent.domain.messages import Message
+    from openagent.session.task_validation import parse_multistep_requirements
+
+    runtime = build_runtime(tmp_path, ScenarioProvider("create_file"))
+    prompt = (
+        "1. 创建文件 `work/demo/config/app.json`，内容为：\n\n"
+        "{\n  \"mode\": \"test\"\n}\n\n"
+        "2. 将 `work/demo/config/app.json` 中的 `\"mode\": \"test\"` 修改为 `\"mode\": \"production\"`。"
+    )
+    requirements = parse_multistep_requirements(prompt)
+    runtime.session_manager.append_message(runtime.session, Message(role="user", content=prompt), mark_running_state=True)
+    runtime.session_manager.sync_checklist(runtime.session, requirements)
+    config_dir = tmp_path / "work" / "demo" / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "app.json").write_text('{\n  "mode": "production"\n}\n', encoding="utf-8")
+    runtime.session_manager.sync_checklist_progress(runtime.session, requirements)
+
+    auto_checklist = [todo for todo in runtime.session.todos if todo.source == "auto-checklist"]
+    assert auto_checklist
+    assert all(todo.status == "completed" for todo in auto_checklist)
+
+
+def test_runtime_preserves_auto_checklist_when_model_writes_matching_todos(tmp_path: Path):
+    from openagent.domain.session import SessionTodo
+
+    runtime = build_runtime(tmp_path, ScenarioProvider("create_file"))
+    runtime.session.todos = [
+        SessionTodo(content="[1] 创建目录 demo", source="auto-checklist", key="checklist:1"),
+        SessionTodo(content="[2] 创建文件 demo/app.json", source="auto-checklist", key="checklist:2"),
+    ]
+    runtime._set_todos(
+        [
+            SessionTodo(content="创建目录 demo", status="done", priority="high"),
+            SessionTodo(content="创建文件 demo/app.json", status="completed", priority="medium"),
+        ]
+    )
+
+    assert all(todo.source == "auto-checklist" for todo in runtime.session.todos)
+    assert all(todo.status == "completed" for todo in runtime.session.todos)

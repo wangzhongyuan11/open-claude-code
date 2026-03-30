@@ -26,7 +26,7 @@ def build_prompt_context(
     historical_summary = summary_message(session)
     if historical_summary:
         prompt_messages.append(historical_summary)
-    context_note = build_context_note(plan)
+    context_note = build_context_note(session, plan)
     if context_note:
         prompt_messages.append(context_note)
     trimmed_recent, trimmed_count = build_recent_prompt_window(plan.recent_messages)
@@ -46,7 +46,7 @@ def build_prompt_context(
     )
 
 
-def build_context_note(plan: CompactionPlan) -> Message | None:
+def build_context_note(session: Session, plan: CompactionPlan) -> Message | None:
     messages = plan.recent_messages
     tool_states: list[str] = []
     recent_files: list[str] = list(plan.recent_files)
@@ -57,6 +57,12 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
     background_notes: list[str] = []
     agent_notes: list[str] = []
     permission_notes: list[str] = []
+    todo_notes: list[str] = []
+    for todo in session.todos:
+        if todo.status == "completed":
+            continue
+        prefix = "[checklist]" if todo.source == "auto-checklist" else "[todo]"
+        todo_notes.append(f"{prefix} {todo.content}")
     for message in messages[-6:]:
         if message.role == "assistant" and message.finish:
             recent_turns.append(f"assistant finish={message.finish}")
@@ -118,7 +124,7 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
                     if status:
                         line += f" status={status}"
                     permission_notes.append(line)
-    if not tool_states and not recent_files and not recent_turns and not recent_patches and not recent_snapshots and not retry_notes and not background_notes and not agent_notes and not permission_notes:
+    if not tool_states and not recent_files and not recent_turns and not recent_patches and not recent_snapshots and not retry_notes and not background_notes and not agent_notes and not permission_notes and not todo_notes:
         return None
     lines = ["[Runtime Context]"]
     lines.append(
@@ -158,6 +164,9 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
     if permission_notes:
         lines.append("Recent permissions:")
         lines.extend(f"- {item}" for item in _dedupe(permission_notes)[-6:])
+    if todo_notes:
+        lines.append("Current checklist / todos:")
+        lines.extend(f"- {item}" for item in _dedupe(todo_notes)[-10:])
     text = "\n".join(lines)
     return Message(
         role="assistant",

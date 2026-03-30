@@ -112,6 +112,8 @@ class SessionStore:
                     "content": todo.content,
                     "status": todo.status,
                     "priority": todo.priority,
+                    "source": todo.source,
+                    "key": todo.key,
                 }
                 for todo in session.todos
             ],
@@ -153,6 +155,8 @@ class SessionStore:
                     content=item["content"],
                     status=item.get("status", "pending"),
                     priority=item.get("priority", "medium"),
+                    source=item.get("source", "manual"),
+                    key=item.get("key"),
                 )
                 for item in payload.get("todos", [])
             ],
