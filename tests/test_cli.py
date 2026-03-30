@@ -33,6 +33,12 @@ def test_classify_repl_text_preserves_multiline_message():
     assert item == ("message", "第一行\n第二行\n")
 
 
+def test_classify_repl_text_does_not_treat_multiline_paste_as_command():
+    item = _classify_repl_text("/status\n这是我粘贴的正文\n")
+
+    assert item == ("message", "/status\n这是我粘贴的正文\n")
+
+
 def test_repl_reader_fallback_collects_multiline_until_end(monkeypatch):
     inputs = iter(["第一行", "第二行", "/end"])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))

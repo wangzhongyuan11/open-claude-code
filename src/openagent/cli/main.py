@@ -196,10 +196,10 @@ def _build_repl_session(workspace: str) -> PromptSession | None:
         key_bindings=bindings,
         prompt_continuation=lambda width, line_number, is_soft_wrap: "... ",
         bottom_toolbar=(
-            "Enter 发送 | Ctrl+J 换行 | /cancel 取消 | /help 帮助"
+            "Enter 发送 | Ctrl+J 换行 | 右键粘贴可用 | /cancel 取消 | /help 帮助"
         ),
         history=FileHistory(str(history_dir / "repl_history")),
-        mouse_support=True,
+        mouse_support=False,
     )
 
 
@@ -425,7 +425,7 @@ def main() -> None:
         else:
             print("当前环境未安装 prompt_toolkit，回退到兼容输入模式：多行输入后仍需用 /end 提交。")
     else:
-        print("已启用 prompt_toolkit 多行编辑器：Enter 发送，Ctrl+J 换行，支持方向键与鼠标定位。")
+        print("已启用 prompt_toolkit 多行编辑器：Enter 发送，Ctrl+J 换行，支持方向键；已关闭鼠标捕获以兼容右键粘贴。")
 
     while True:
         item = _read_repl_input(repl_session)

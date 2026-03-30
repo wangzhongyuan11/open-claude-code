@@ -129,7 +129,8 @@ Interactive input mode:
 - `Ctrl+J` inserts a newline inside the current message
 - pasted multiline text is preserved as one message, including trailing blank lines
 - arrow keys move the cursor inside the current buffer
-- mouse clicks can reposition the cursor when the terminal supports it
+- mouse capture is disabled so terminal right-click paste keeps working
+- only single-line slash commands are treated as commands; pasted multiline text is always treated as a normal message
 - `/cancel` discards the current buffered message
 - slash commands such as `/status` or `/inspect` can be entered directly as single-line input
 
