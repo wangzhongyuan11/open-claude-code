@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "A minimal Python coding agent runtime"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "prompt_toolkit>=3.0.52",
+]
 
 [project.optional-dependencies]
 dev = [

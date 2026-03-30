@@ -124,10 +124,12 @@ Interactive commands:
 Interactive input mode:
 
 - REPL now uses an editor-style multiline input
+- `prompt_toolkit` is installed by default and powers the primary REPL experience
 - `Enter` sends the current message immediately
 - `Ctrl+J` inserts a newline inside the current message
 - pasted multiline text is preserved as one message, including trailing blank lines
 - arrow keys move the cursor inside the current buffer
+- mouse clicks can reposition the cursor when the terminal supports it
 - `/cancel` discards the current buffered message
 - slash commands such as `/status` or `/inspect` can be entered directly as single-line input
 
