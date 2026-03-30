@@ -118,16 +118,18 @@ Interactive commands:
 - `/agent <name>`
 - `/agent show <name>`
 - `/agent create <desc>`
-- `/end`
 - `/cancel`
 - `/exit`
 
 Interactive input mode:
 
-- REPL now buffers multiline input by default
-- only `/end` submits the current message
+- REPL now uses an editor-style multiline input
+- `Enter` sends the current message immediately
+- `Ctrl+J` inserts a newline inside the current message
+- pasted multiline text is preserved as one message, including trailing blank lines
+- arrow keys move the cursor inside the current buffer
 - `/cancel` discards the current buffered message
-- slash commands such as `/status` or `/inspect` must be entered on an empty buffer
+- slash commands such as `/status` or `/inspect` can be entered directly as single-line input
 
 Interactive command reference:
 
@@ -176,8 +178,6 @@ Interactive command reference:
   - invokes the hidden generate agent, persists the result under `.openagent/agents/`, and reloads the registry
 - `/cancel`
   - discards the current multiline input buffer before submission
-- `/end`
-  - submits the current multiline input buffer as one user message
 - `/exit`
   - exits the REPL
 

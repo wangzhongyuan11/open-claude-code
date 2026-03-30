@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import argparse
+import codecs
+import os
 import shlex
+import sys
+import termios
+from pathlib import Path
+import tty
 from typing import Any
 
 from openagent.agent.runtime import build_default_runtime, build_session_manager
 from openagent.config.env import load_dotenv
 from openagent.session.todo import render_todos
+
+try:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
+except ImportError:  # pragma: no cover - exercised by fallback path
+    PromptSession = None
+    FileHistory = None
+    KeyBindings = None
 
 SHELL_COMMANDS = {
     "/help",
@@ -46,8 +61,7 @@ HELP_TEXT = """Available interactive commands:
 /agent <name>             Switch the active primary agent
 /agent show <name>        Show a stored agent definition
 /agent create <desc>      Generate and persist a custom agent
-/cancel                   Discard the current multiline input buffer
-/end                      Submit the current multiline input buffer
+/cancel                   Discard the current input buffer
 /exit                     Exit the REPL"""
 
 
@@ -143,7 +157,178 @@ def _permission_handler(request) -> str:
         print("Please answer with once, always, or reject.")
 
 
-def _read_repl_input() -> tuple[str, str] | None:
+def _classify_repl_text(text: str) -> tuple[str, str] | None:
+    stripped = text.strip()
+    if not stripped:
+        return None
+    if stripped == "/cancel":
+        print("[cancelled]")
+        return None
+    if stripped in {"/exit", "exit", "quit"}:
+        return ("command", "/exit")
+    if "\n" not in text and (
+        stripped in SHELL_COMMANDS
+        or stripped.startswith("/todo ")
+        or stripped.startswith("/agent ")
+        or stripped.startswith("/yolo ")
+    ):
+        return ("command", stripped)
+    return ("message", text)
+
+
+def _build_repl_session(workspace: str) -> PromptSession | None:
+    if PromptSession is None or FileHistory is None or KeyBindings is None:
+        return None
+    history_dir = Path(workspace) / ".openagent"
+    history_dir.mkdir(parents=True, exist_ok=True)
+    bindings = KeyBindings()
+
+    @bindings.add("enter")
+    def _submit(event) -> None:
+        event.app.exit(result=event.current_buffer.text)
+
+    @bindings.add("c-j")
+    def _newline(event) -> None:
+        event.current_buffer.insert_text("\n")
+
+    return PromptSession(
+        multiline=True,
+        key_bindings=bindings,
+        prompt_continuation=lambda width, line_number, is_soft_wrap: "... ",
+        bottom_toolbar=(
+            "Enter 发送 | Ctrl+J 换行 | /cancel 取消 | /help 帮助"
+        ),
+        history=FileHistory(str(history_dir / "repl_history")),
+    )
+
+
+def _move_cursor(text: str, cursor: int) -> tuple[int, int]:
+    before = text[:cursor]
+    row = before.count("\n")
+    col = len(before.rsplit("\n", 1)[-1])
+    return row, col
+
+
+def _render_raw_buffer(text: str, cursor: int, previous_lines: int) -> int:
+    lines = text.split("\n") if text else [""]
+    total_lines = max(1, len(lines))
+    if previous_lines:
+        sys.stdout.write("\r")
+        if previous_lines > 1:
+            sys.stdout.write(f"\x1b[{previous_lines - 1}A")
+        sys.stdout.write("\x1b[J")
+    for index, line in enumerate(lines):
+        prefix = "openagent> " if index == 0 else "... "
+        if index:
+            sys.stdout.write("\n")
+        sys.stdout.write(prefix + line)
+    row, col = _move_cursor(text, cursor)
+    sys.stdout.write("\r")
+    if total_lines > 1:
+        sys.stdout.write(f"\x1b[{total_lines - 1}A")
+    if row:
+        sys.stdout.write(f"\x1b[{row}B")
+    prefix_len = len("openagent> " if row == 0 else "... ")
+    if prefix_len + col:
+        sys.stdout.write(f"\x1b[{prefix_len + col}C")
+    sys.stdout.flush()
+    return total_lines
+
+
+def _read_repl_input_raw() -> tuple[str, str] | None:
+    if not sys.stdin.isatty():
+        return None
+    fd = sys.stdin.fileno()
+    original = termios.tcgetattr(fd)
+    text = ""
+    cursor = 0
+    rendered_lines = 0
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    try:
+        tty.setraw(fd)
+        rendered_lines = _render_raw_buffer(text, cursor, rendered_lines)
+        while True:
+            chunk = os.read(fd, 1)
+            if not chunk:
+                sys.stdout.write("\n")
+                return None
+            if chunk in {b"\x03", b"\x04", b"\x1b", b"\r", b"\n", b"\x7f", b"\x08"}:
+                decoder.reset()
+                ch = chunk.decode("utf-8", errors="ignore")
+            else:
+                ch = decoder.decode(chunk, final=False)
+                if not ch:
+                    continue
+            if ch == "\x03":
+                sys.stdout.write("\n")
+                return None
+            if ch == "\x04":
+                if not text:
+                    sys.stdout.write("\n")
+                    return None
+                continue
+            if ch == "\x1b":
+                seq = os.read(fd, 2).decode("utf-8", errors="ignore")
+                if seq == "[D" and cursor > 0:
+                    cursor -= 1
+                elif seq == "[C" and cursor < len(text):
+                    cursor += 1
+                elif seq == "[A":
+                    row, col = _move_cursor(text, cursor)
+                    if row > 0:
+                        lines = text.split("\n")
+                        prev_len = len(lines[row - 1])
+                        target = min(prev_len, col)
+                        cursor -= col + 1
+                        cursor -= prev_len - target
+                elif seq == "[B":
+                    row, col = _move_cursor(text, cursor)
+                    lines = text.split("\n")
+                    if row < len(lines) - 1:
+                        next_len = len(lines[row + 1])
+                        cursor += (len(lines[row]) - col) + 1
+                        cursor += min(next_len, col)
+                rendered_lines = _render_raw_buffer(text, cursor, rendered_lines)
+                continue
+            elif ch in {"\r"}:
+                sys.stdout.write("\n")
+                item = _classify_repl_text(text)
+                if item is not None:
+                    return item
+                text = ""
+                cursor = 0
+            elif ch == "\n":
+                text = text[:cursor] + "\n" + text[cursor:]
+                cursor += 1
+            elif ch in {"\x7f", "\b"}:
+                if cursor > 0:
+                    text = text[: cursor - 1] + text[cursor:]
+                    cursor -= 1
+            elif ch and ch >= " ":
+                text = text[:cursor] + ch + text[cursor:]
+                cursor += 1
+            rendered_lines = _render_raw_buffer(text, cursor, rendered_lines)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, original)
+
+
+def _read_repl_input(session: PromptSession | None = None) -> tuple[str, str] | None:
+    if session is not None:
+        while True:
+            try:
+                text = session.prompt("openagent> ")
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return None
+            item = _classify_repl_text(text)
+            if item is not None:
+                return item
+        return None
+
+    raw_item = _read_repl_input_raw()
+    if raw_item is not None:
+        return raw_item
+
     buffer: list[str] = []
     while True:
         prompt = "openagent> " if not buffer else "... "
@@ -232,10 +417,17 @@ def main() -> None:
         return
 
     _print_session_summary(runtime)
-    print("输入多行消息后，用 /end 提交；输入 /cancel 放弃当前输入。Slash 命令需要在空输入状态下单独输入。")
+    repl_session = _build_repl_session(args.workspace)
+    if repl_session is None:
+        if sys.stdin.isatty():
+            print("当前环境未安装 prompt_toolkit，使用内置多行编辑器：Enter 发送，Ctrl+J 换行，支持方向键编辑。")
+        else:
+            print("当前环境未安装 prompt_toolkit，回退到兼容输入模式：多行输入后仍需用 /end 提交。")
+    else:
+        print("Enter 直接发送；Ctrl+J 插入换行；支持多行粘贴与方向键编辑。Slash 命令可直接输入。")
 
     while True:
-        item = _read_repl_input()
+        item = _read_repl_input(repl_session)
         if item is None:
             break
         item_type, user_input = item

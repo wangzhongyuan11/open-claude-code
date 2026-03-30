@@ -1,6 +1,6 @@
 from argparse import Namespace
 
-from openagent.cli.main import _read_repl_input, build_parser
+from openagent.cli.main import _classify_repl_text, _read_repl_input, build_parser
 
 
 def test_cli_parser_accepts_prompt_and_print_session():
@@ -27,7 +27,13 @@ def test_cli_parser_accepts_agent_create_and_show():
     assert args.agent_show == "build"
 
 
-def test_repl_reader_collects_multiline_until_end(monkeypatch):
+def test_classify_repl_text_preserves_multiline_message():
+    item = _classify_repl_text("第一行\n第二行\n")
+
+    assert item == ("message", "第一行\n第二行\n")
+
+
+def test_repl_reader_fallback_collects_multiline_until_end(monkeypatch):
     inputs = iter(["第一行", "第二行", "/end"])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
 
@@ -37,10 +43,7 @@ def test_repl_reader_collects_multiline_until_end(monkeypatch):
 
 
 def test_repl_reader_executes_command_only_when_buffer_empty(monkeypatch):
-    inputs = iter(["/help"])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    item = _read_repl_input()
+    item = _classify_repl_text("/help")
 
     assert item == ("command", "/help")
 
@@ -55,9 +58,13 @@ def test_repl_reader_cancel_discards_buffer(monkeypatch):
 
 
 def test_repl_reader_treats_yolo_toggle_as_command(monkeypatch):
-    inputs = iter(["/yolo on"])
-    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
-
-    item = _read_repl_input()
+    item = _classify_repl_text("/yolo on")
 
     assert item == ("command", "/yolo on")
+
+
+def test_classify_repl_text_treats_cancel_as_noop(capsys):
+    item = _classify_repl_text("/cancel")
+
+    assert item is None
+    assert "[cancelled]" in capsys.readouterr().out
