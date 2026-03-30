@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from openagent.agent.subagent import SubagentManager, format_subagent_report
+from openagent.agent.subagent import SubagentManager, format_subagent_report, normalize_subagent_name
 from openagent.domain.session import SessionTodo
 from openagent.domain.tools import ToolContext, ToolExecutionResult
 from openagent.session.todo import render_todos
@@ -87,7 +87,7 @@ class TaskTool(BaseTool):
         try:
             result = self.subagent_manager.run(
                 arguments["prompt"],
-                agent_name=arguments.get("subagent_type", "general"),
+                agent_name=normalize_subagent_name(arguments.get("subagent_type", "general")),
             )
         except TypeError:
             result = self.subagent_manager.run(arguments["prompt"])
@@ -103,7 +103,7 @@ class TaskTool(BaseTool):
                 "</task_result>",
             ]
         )
-        agent_name = getattr(result, "agent_name", None) or arguments.get("subagent_type") or "general"
+        agent_name = getattr(result, "agent_name", None) or normalize_subagent_name(arguments.get("subagent_type", "general"))
         return ToolExecutionResult.success(
             output,
             title=title,

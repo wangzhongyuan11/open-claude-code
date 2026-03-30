@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from openagent.agent.subagent import SubagentManager, format_subagent_report
+from openagent.agent.subagent import SubagentManager, format_subagent_report, normalize_subagent_name
 from openagent.domain.tools import ToolContext, ToolExecutionResult
 from openagent.tools.base import BaseTool
 
@@ -24,12 +24,13 @@ class DelegateTool(BaseTool):
         self.subagent_manager = subagent_manager
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
-        result = self.subagent_manager.run(arguments["prompt"], agent_name=arguments.get("agent", "general"))
+        requested_agent = normalize_subagent_name(arguments.get("agent", "general"))
+        result = self.subagent_manager.run(arguments["prompt"], agent_name=requested_agent)
         return ToolExecutionResult.success(
             format_subagent_report(result),
             title="Delegated subtask",
             metadata={
-                "agent": arguments.get("agent", "general"),
+                "agent": requested_agent,
                 "subagent_agent": result.agent_name,
                 "message_count": len(result.history),
                 "touched_paths": result.touched_paths,

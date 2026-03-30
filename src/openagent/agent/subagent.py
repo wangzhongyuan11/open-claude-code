@@ -22,6 +22,31 @@ SessionIDFactory = Callable[[], str]
 RuntimeStateFactory = Callable[[str], dict]
 
 
+def normalize_subagent_name(agent_name: str | None) -> str:
+    normalized = (agent_name or "").strip().lower()
+    if not normalized:
+        return "general"
+    aliases = {
+        "default": "general",
+        "coding": "general",
+        "coder": "general",
+        "implement": "general",
+        "implementation": "general",
+        "general": "general",
+        "explore": "explore",
+        "explorer": "explore",
+        "research": "explore",
+        "researcher": "explore",
+        "search": "explore",
+        "analysis": "explore",
+        "analyze": "explore",
+        "readonly": "explore",
+        "read-only": "explore",
+        "plan": "explore",
+    }
+    return aliases.get(normalized, normalized)
+
+
 @dataclass(slots=True)
 class SubagentResult:
     agent_name: str
@@ -56,7 +81,8 @@ class SubagentManager:
         self.event_bus = event_bus
 
     def run(self, prompt: str, agent_name: str = "general", max_steps: int | None = None) -> SubagentResult:
-        profile = self.profile_lookup(agent_name)
+        resolved_agent = normalize_subagent_name(agent_name)
+        profile = self.profile_lookup(resolved_agent)
         if self.event_bus:
             self.event_bus.emit(Event(type="subagent.started", payload={"prompt": prompt, "agent": profile.name}))
         try:

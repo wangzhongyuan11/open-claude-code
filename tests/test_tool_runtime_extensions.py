@@ -10,14 +10,14 @@ from openagent.tools.builtin.web import WebFetchTool, WebSearchTool
 
 
 class DummySubagentManager:
-    def run(self, prompt: str):
-        class Result:
-            summary = "subagent completed"
-            touched_paths = ["work/sub.txt"]
-            verified_paths = ["work/sub.txt"]
-            history = [Message(role="assistant", content="ok")]
-
-        return Result()
+    def run(self, prompt: str, agent_name: str = "general"):
+        result = type("Result", (), {})()
+        result.summary = "subagent completed"
+        result.touched_paths = ["work/sub.txt"]
+        result.verified_paths = ["work/sub.txt"]
+        result.history = [Message(role="assistant", content="ok")]
+        result.agent_name = agent_name
+        return result
 
 
 def test_alias_read_write_edit_and_patch_tools(tmp_path: Path):
@@ -77,6 +77,28 @@ def test_task_tool_returns_structured_task_result(tmp_path: Path):
     assert not result.is_error
     assert "task_id: task-1" in result.content
     assert "<task_result>" in result.content
+
+
+def test_delegate_and_task_normalize_agent_aliases(tmp_path: Path):
+    from openagent.tools.builtin.delegate import DelegateTool
+
+    context = ToolContext(workspace=tmp_path)
+    delegate_result = DelegateTool(DummySubagentManager()).invoke(
+        {"prompt": "do it", "agent": "coding"},
+        context,
+    )
+    task_result = TaskTool(DummySubagentManager()).invoke(
+        {
+            "description": "Explore references",
+            "prompt": "find references",
+            "subagent_type": "research",
+            "task_id": "task-2",
+        },
+        context,
+    )
+    assert delegate_result.metadata["agent"] == "general"
+    assert task_result.metadata["subagent_type"] == "research"
+    assert task_result.metadata["agent"] == "explore"
 
 
 def test_question_tool_uses_runtime_handler(tmp_path: Path):

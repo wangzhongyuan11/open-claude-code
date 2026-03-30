@@ -247,6 +247,8 @@ For numbered multi-step checklist requests, the runtime now performs a final-sta
 - parses required directories, files, replacements, and final summary conditions from the user checklist
 - validates the actual workspace state instead of trusting a premature textual success claim
 - re-enters the loop with a continuation prompt when unfinished requirements remain
+- stops cleanly after the final verification reads instead of drifting into extra tool loops
+- nudges the build agent to treat large numbered prompts as checklists and use `todowrite` / `task` deliberately when that helps preserve progress
 - only accepts the turn once the final file states and required closing summary are satisfied
 
 The runtime prompt is assembled from:

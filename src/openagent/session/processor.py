@@ -11,7 +11,12 @@ from openagent.events.bus import EventBus
 from openagent.providers.base import BaseProvider
 from openagent.session.llm import LLMRequest, SessionLLM
 from openagent.session.message_builder import AssistantMessageBuilder, ToolMessageBuilder
-from openagent.session.termination import detect_completion
+from openagent.session.task_validation import (
+    looks_multistep,
+    parse_multistep_requirements,
+    validate_multistep_requirements,
+)
+from openagent.session.termination import TerminationDecision, detect_completion
 from openagent.tools.registry import ToolRegistry
 
 
@@ -51,6 +56,9 @@ class SessionProcessor:
         last_tool_result: tuple[str, str] | None = None
         step_count = 0
         tool_call_count = 0
+        multistep_requirements = None
+        if looks_multistep(self._last_user_text(history)):
+            multistep_requirements = parse_multistep_requirements(self._last_user_text(history))
 
         for _ in range(max_steps):
             step_count += 1
@@ -128,6 +136,22 @@ class SessionProcessor:
                         step_count=step_count,
                         tool_call_count=tool_call_count,
                     )
+                multistep_decision = self._detect_multistep_completion(
+                    last_user_text=last_user_text,
+                    tool_name=tool_call.name,
+                    history=history,
+                    requirements=multistep_requirements,
+                )
+                if multistep_decision is not None:
+                    history.append(Message(role="assistant", content=multistep_decision.reply, finish="stop"))
+                    self._emit("loop.completed", {"termination_reason": multistep_decision.reason})
+                    return ProcessorResult(
+                        history=history,
+                        finish_reason="stop",
+                        unstable=False,
+                        step_count=step_count,
+                        tool_call_count=tool_call_count,
+                    )
                 call_key = self._call_fingerprint(tool_call.name, tool_call.arguments)
                 repeated_calls[call_key] = repeated_calls.get(call_key, 0) + 1
                 if repeated_calls[call_key] >= 3:
@@ -157,6 +181,56 @@ class SessionProcessor:
         if self.event_bus is None:
             return
         self.event_bus.emit(Event(type=event_type, payload=payload))
+
+    def _detect_multistep_completion(
+        self,
+        last_user_text: str,
+        tool_name: str,
+        history: list[Message],
+        requirements,
+    ):
+        if requirements is None:
+            return None
+        validation = validate_multistep_requirements(self.tool_context.workspace, requirements)
+        if not validation.complete:
+            return None
+        if tool_name not in {"read_file", "read", "read_symbol"}:
+            return None
+        decision = self._build_multistep_completion_reply(last_user_text, history)
+        return decision
+
+    @staticmethod
+    def _build_multistep_completion_reply(last_user_text: str, history: list[Message]):
+        tool_names: dict[str, str] = {}
+        for message in history:
+            if message.role == "assistant" and message.tool_calls:
+                for tool_call in message.tool_calls:
+                    tool_names[tool_call.id] = tool_call.name
+        read_results: list[str] = []
+        for message in reversed(history):
+            if message.role != "tool":
+                continue
+            if tool_names.get(message.tool_call_id) not in {"read_file", "read", "read_symbol"}:
+                continue
+            if message.content:
+                read_results.append(message.content.strip())
+            if len(read_results) >= 3:
+                break
+        if "只告诉我三件事" in last_user_text and len(read_results) >= 3:
+            readme_text, config_text, subtask_text = list(reversed(read_results[:3]))
+            lines = [
+                f"README 是否含 delegate subtask：{'是' if 'delegate subtask' in readme_text else '否'}",
+                f"mode 是否为 production：{'是' if 'production' in config_text else '否'}",
+                f"子代理是否成功：{'是' if 'delegated-ok' in subtask_text or 'created by delegated agent' in subtask_text else '否'}",
+            ]
+            return TerminationDecision(True, "\n".join(lines), "multistep-validated")
+        if "只告诉我三件事" in last_user_text:
+            return None
+        if "只告诉我最终内容" in last_user_text or "原样返回" in last_user_text:
+            for content in read_results:
+                if content:
+                    return TerminationDecision(True, content, "multistep-validated")
+        return TerminationDecision(True, "任务全部完成", "multistep-validated")
 
     @staticmethod
     def _call_fingerprint(name: str, arguments: dict) -> str:

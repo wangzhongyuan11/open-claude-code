@@ -298,3 +298,65 @@ def test_runtime_completes_full_checklist_request_with_continuation_and_delegate
     assert (tmp_path / "work/demo_project/logs/run.log").read_text(encoding="utf-8") == "[INIT] demo project created\n[STATUS] verified\n"
     assert (tmp_path / "work/demo_project/docs/subtask_note.txt").read_text(encoding="utf-8") == "this file is created by delegated agent"
     assert "任务全部完成" in reply
+
+
+def test_runtime_stops_after_final_multistep_verification_reads(tmp_path: Path):
+    class MultiReadProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="c1", name="ensure_dir", arguments={"path": "work/multi/docs"})],
+                    finish="tool-calls",
+                )
+            if self.calls == 2:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="c2", name="write_file", arguments={"path": "work/multi/docs/README.md", "content": "# Demo\ndelegate subtask"})],
+                    finish="tool-calls",
+                )
+            if self.calls == 3:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="c3", name="ensure_dir", arguments={"path": "work/multi/config"})],
+                    finish="tool-calls",
+                )
+            if self.calls == 4:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="c4", name="write_file", arguments={"path": "work/multi/config/app.json", "content": '{"mode": "production"}'})],
+                    finish="tool-calls",
+                )
+            if self.calls == 5:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="c5", name="write_file", arguments={"path": "work/multi/docs/subtask.txt", "content": "delegated-ok"})],
+                    finish="tool-calls",
+                )
+            if self.calls == 6:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="c6", name="read_file", arguments={"path": "work/multi/docs/README.md"})],
+                    finish="tool-calls",
+                )
+            if self.calls == 7:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="c7", name="read_file", arguments={"path": "work/multi/config/app.json"})],
+                    finish="tool-calls",
+                )
+            return AgentResponse(
+                tool_calls=[ToolCall(id="c8", name="read_file", arguments={"path": "work/multi/docs/subtask.txt"})],
+                finish="tool-calls",
+            )
+
+    runtime = build_runtime(tmp_path, MultiReadProvider())
+    reply = runtime.run_turn(
+        "请严格按顺序完成：\n"
+        "1. 创建 work/multi 及 docs、config 子目录。\n"
+        "2. 写入 docs/README.md，内容包含标题 Demo 和一行 delegate subtask。\n"
+        "3. 写入 config/app.json，mode 是 test。\n"
+        "4. 把 mode 改成 production。\n"
+        "5. 委派子代理创建 work/multi/docs/subtask.txt，内容 delegated-ok。\n"
+        "6. 最后读取 README.md、app.json、subtask.txt，只告诉我三件事：README 是否含 delegate subtask；mode 是否为 production；子代理是否成功。"
+    )
+    assert "README 是否含 delegate subtask：是" in reply
+    assert "mode 是否为 production：是" in reply
+    assert "子代理是否成功：是" in reply

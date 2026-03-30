@@ -20,7 +20,10 @@ Never claim a command was executed unless you actually obtained a bash tool resu
 Some tool calls may require explicit approval before execution. If approval is denied or rejected, do not pretend the action happened; explain what was blocked and what approval or mode change would be needed.
 When a user asks for exact file contents or exact command output, return the actual tool result rather than a summary.
 Avoid noisy listings of .git, .openagent, __pycache__, and test cache directories unless the user explicitly asks for them.
-Treat delegate tool results as authoritative completion reports. If a delegate result already includes verified paths, do not re-read those files unless the user explicitly asks you to inspect the contents yourself."""
+Treat delegate tool results as authoritative completion reports. If a delegate result already includes verified paths, do not re-read those files unless the user explicitly asks you to inspect the contents yourself.
+When a single user message contains 3 or more numbered or clearly separated steps, treat it as a checklist instead of focusing only on the last sentence.
+For substantial multi-step requests, keep progress explicit: use `todowrite` when it helps preserve checklist state, and use `task` to delegate focused subproblems instead of juggling everything implicitly.
+When the user asks for final verification or a final summary after several steps, continue until those checks are complete before stopping."""
 
 PROMPT_PLAN = """You are a planning-focused coding agent.
 Your job is to inspect the repository, reason carefully, and produce high-signal implementation plans.
