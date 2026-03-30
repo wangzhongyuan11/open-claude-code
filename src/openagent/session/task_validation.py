@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import re
+import textwrap
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -84,7 +86,7 @@ def validate_multistep_requirements(
             missing.append(f"文件未创建: {rel_path}")
             continue
         actual = path.read_text(encoding="utf-8")
-        if _normalize_ws(actual) != _normalize_ws(expected_content):
+        if not _contents_match(path, actual, expected_content):
             missing.append(
                 "文件内容不符合预期: "
                 f"{rel_path}\n期望:\n{expected_content}\n实际:\n{actual}"
@@ -138,16 +140,20 @@ def _extract_declared_directories(block: str) -> list[str]:
 
 
 def _extract_create_file_blocks(block: str, default_path: str | None = None) -> list[tuple[str, str]]:
-    pattern = re.compile(r"创建文件\s+`([^`]+)`，内容为(?:[:：])?\s*(.*)$", re.S)
-    match = pattern.search(block)
+    multiline_pattern = re.compile(r"创建文件\s+`([^`]+)`，内容为(?:[:：])?[ \t]*\n(.*)$", re.S)
+    match = multiline_pattern.search(block)
     if match:
-        path = match.group(1)
-        content = match.group(2).strip()
-        return [(path, content)]
+        return [(match.group(1), match.group(2))]
+    inline_pattern = re.compile(r"创建文件\s+`([^`]+)`，内容为(?:[:：])?[ \t]*(.*)$", re.S)
+    match = inline_pattern.search(block)
+    if match:
+        return [(match.group(1), match.group(2))]
     if default_path and re.search(r"创建(?:这个|该)?文件", block):
-        fallback = re.search(r"内容为(?:[:：])?\s*(.*)$", block, re.S)
+        fallback = re.search(r"内容为(?:[:：])?[ \t]*\n(.*)$", block, re.S) or re.search(
+            r"内容为(?:[:：])?[ \t]*(.*)$", block, re.S
+        )
         if fallback:
-            return [(default_path, fallback.group(1).strip())]
+            return [(default_path, fallback.group(1))]
     return []
 
 
@@ -173,8 +179,24 @@ def _normalize_ws(text: str) -> str:
     return "\n".join(line.rstrip() for line in text.strip().splitlines())
 
 
+def _contents_match(path: Path, actual: str, expected: str) -> bool:
+    if path.suffix.lower() == ".json":
+        actual_json = _try_parse_json(actual)
+        expected_json = _try_parse_json(expected)
+        if actual_json is not None and expected_json is not None:
+            return actual_json == expected_json
+    return _normalize_ws(actual) == _normalize_ws(expected)
+
+
+def _try_parse_json(text: str):
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
 def _clean_block_content(text: str) -> str:
-    cleaned = text.strip()
+    cleaned = textwrap.dedent(text).strip()
     if cleaned.startswith("`") and cleaned.endswith("`") and "\n" not in cleaned:
         return cleaned[1:-1]
     quoted = re.match(r"^`([^`]+)`[。．.!！]?$", cleaned)

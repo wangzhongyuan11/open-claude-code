@@ -7,6 +7,7 @@ from openagent.providers.base import BaseProvider
 from openagent.session.manager import SessionManager
 from openagent.session.store import SessionStore
 from openagent.session.task_validation import parse_multistep_requirements
+from openagent.session.task_validation import MultiStepRequirements, validate_multistep_requirements
 
 
 class ScenarioProvider(BaseProvider):
@@ -426,6 +427,33 @@ def test_parse_multistep_supports_inline_create_file_without_colon():
     requirements = parse_multistep_requirements(prompt)
     assert requirements.final_files["work/demo/config/app.json"] == '{\n  "mode": "production"\n}'
     assert requirements.final_files["work/demo/output/subtask.txt"] == "delegated-ok"
+
+
+def test_validate_multistep_treats_json_equivalently_despite_indentation(tmp_path: Path):
+    config_dir = tmp_path / "work" / "demo" / "config"
+    config_dir.mkdir(parents=True)
+    (config_dir / "app.json").write_text('{\n    "mode": "production",\n    "name": "demo"\n}\n', encoding="utf-8")
+
+    requirements = MultiStepRequirements(
+        final_files={"work/demo/config/app.json": '{\n  "mode": "production",\n  "name": "demo"\n}'}
+    )
+
+    result = validate_multistep_requirements(tmp_path, requirements)
+
+    assert result.complete is True
+
+
+def test_parse_multistep_dedents_indented_multiline_file_content():
+    prompt = (
+        "1. 创建文件 `work/demo/docs/README.md`，内容为：\n"
+        "  # Checklist Demo\n"
+        "\n"
+        "  - alpha\n"
+        "  - beta\n"
+        "  - delegate subtask\n"
+    )
+    requirements = parse_multistep_requirements(prompt)
+    assert requirements.final_files["work/demo/docs/README.md"] == "# Checklist Demo\n\n- alpha\n- beta\n- delegate subtask"
 
 
 def test_request_requires_tool_ignores_planning_only_text():

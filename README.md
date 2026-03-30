@@ -379,6 +379,8 @@ For numbered multi-step checklist requests, the runtime now performs a final-sta
 - for long numbered requests, the runtime now mirrors the parsed checklist into session todos so the active turn sees an explicit pending-step list instead of relying only on the raw prompt text
 - only accepts the turn once the final file states and required closing summary are satisfied
 - supports delegated inline file-creation steps such as “创建文件 ...，内容为 `delegated-ok`” without accidentally rebinding the content to the previous file in the checklist
+- dedents uniformly indented multi-line file blocks captured from REPL paste input so checklist validation does not confuse prompt indentation with intended file content
+- compares JSON final files semantically instead of byte-for-byte so equivalent formatting does not trigger unnecessary continuation loops
 
 Todo notes:
 

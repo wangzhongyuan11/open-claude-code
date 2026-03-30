@@ -32,6 +32,7 @@ def normalize_subagent_name(agent_name: str | None) -> str:
         "code": "general",
         "coding": "general",
         "coder": "general",
+        "python": "general",
         "developer": "general",
         "dev": "general",
         "builder": "general",

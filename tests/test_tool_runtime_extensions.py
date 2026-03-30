@@ -123,6 +123,17 @@ def test_delegate_normalizes_generic_alias(tmp_path: Path):
     assert result.metadata["agent"] == "general"
 
 
+def test_delegate_normalizes_python_alias(tmp_path: Path):
+    from openagent.tools.builtin.delegate import DelegateTool
+
+    context = ToolContext(workspace=tmp_path)
+    result = DelegateTool(DummySubagentManager()).invoke(
+        {"prompt": "do it", "agent": "python"},
+        context,
+    )
+    assert result.metadata["agent"] == "general"
+
+
 def test_question_tool_uses_runtime_handler(tmp_path: Path):
     context = ToolContext(
         workspace=tmp_path,
