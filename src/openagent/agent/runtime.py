@@ -744,6 +744,33 @@ class AgentRuntime:
     @staticmethod
     def _request_requires_tool(user_text: str) -> bool:
         lowered = user_text.lower()
+        planning_only_tokens = [
+            "不要修改代码",
+            "不要修改",
+            "只说明",
+            "只分析",
+            "仅分析",
+            "只给方案",
+            "先分析",
+            "只返回函数名",
+            "不需要执行",
+        ]
+        if any(token in lowered for token in planning_only_tokens):
+            direct_tool_targets = [
+                "读取",
+                "查找",
+                "搜索",
+                "定位",
+                "运行测试",
+                "执行命令",
+                "read ",
+                "grep",
+                "glob",
+                "search",
+                "find ",
+            ]
+            if not any(token in lowered for token in direct_tool_targets):
+                return False
         keywords = [
             "read ",
             "write ",

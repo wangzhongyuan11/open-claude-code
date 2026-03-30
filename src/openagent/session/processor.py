@@ -226,7 +226,12 @@ class SessionProcessor:
             return TerminationDecision(True, "\n".join(lines), "multistep-validated")
         if "只告诉我三件事" in last_user_text:
             return None
-        if "只告诉我最终内容" in last_user_text or "原样返回" in last_user_text:
+        if (
+            "只告诉我最终内容" in last_user_text
+            or "只回复最终内容" in last_user_text
+            or "只回复其内容" in last_user_text
+            or "原样返回" in last_user_text
+        ):
             for content in read_results:
                 if content:
                     return TerminationDecision(True, content, "multistep-validated")

@@ -38,21 +38,27 @@ def looks_multistep(user_text: str) -> bool:
 def parse_multistep_requirements(user_text: str) -> MultiStepRequirements:
     req = MultiStepRequirements()
     step_blocks = _split_step_blocks(user_text)
+    last_file_path: str | None = None
     for number, block in step_blocks:
         step = ChecklistStep(number=number, text=_step_text(block))
         if "创建目录" in block:
             step.directories.extend(_extract_declared_directories(block))
             req.directories.extend(step.directories)
-        for path, content in _extract_create_file_blocks(block):
+        for path, content in _extract_create_file_blocks(block, default_path=last_file_path):
             cleaned = _clean_block_content(content)
             step.created_files[path] = cleaned
             req.created_files[path] = cleaned
             req.final_files[path] = cleaned
+            last_file_path = path
         for path, old_text, new_text in _extract_replacements(block):
             step.replacements.append((path, old_text, new_text))
             req.replacements.append((path, old_text, new_text))
             if path in req.final_files:
                 req.final_files[path] = req.final_files[path].replace(old_text, new_text, 1)
+            last_file_path = path
+        inferred_path = _infer_last_file_reference(block)
+        if inferred_path is not None:
+            last_file_path = inferred_path
         step.verification_only = "最后读取" in block or "最终内容" in block or "只告诉我" in block
         req.steps.append(step)
     req.requires_final_summary = "最后直接告诉我" in user_text or "任务全部完成" in user_text
@@ -131,14 +137,18 @@ def _extract_declared_directories(block: str) -> list[str]:
     return _dedupe(results)
 
 
-def _extract_create_file_blocks(block: str) -> list[tuple[str, str]]:
+def _extract_create_file_blocks(block: str, default_path: str | None = None) -> list[tuple[str, str]]:
     pattern = re.compile(r"创建文件\s+`([^`]+)`，内容为：\s*(.*)$", re.S)
     match = pattern.search(block)
-    if not match:
-        return []
-    path = match.group(1)
-    content = match.group(2).strip()
-    return [(path, content)]
+    if match:
+        path = match.group(1)
+        content = match.group(2).strip()
+        return [(path, content)]
+    if default_path and re.search(r"创建(?:这个|该)?文件", block):
+        fallback = re.search(r"内容为(?:[:：])?\s*(.*)$", block, re.S)
+        if fallback:
+            return [(default_path, fallback.group(1).strip())]
+    return []
 
 
 def _extract_replacements(block: str) -> list[tuple[str, str, str]]:
@@ -183,3 +193,11 @@ def _dedupe(values: list[str]) -> list[str]:
 
 def _step_text(block: str) -> str:
     return re.sub(r"^\s*\d+\.\s*", "", block.strip(), flags=re.S)
+
+
+def _infer_last_file_reference(block: str) -> str | None:
+    for item in reversed(_extract_backtick_paths(block)):
+        path = Path(item)
+        if path.suffix or "/" in item:
+            return item
+    return None

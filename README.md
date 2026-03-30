@@ -29,6 +29,67 @@ src/openagent/
   tools/       registry and builtin tools
 ```
 
+## Core Architecture
+
+`openagent` is organized around a session-centric runtime:
+
+- `cli/main.py`
+  - parses CLI flags, launches the runtime, handles interactive slash commands, permission prompts, and multiline input
+- `agent/runtime.py`
+  - top-level orchestrator
+  - owns the active agent profile, current session, tool registry, provider, subagent manager, and runtime policy
+- `session/manager.py`
+  - creates / loads / saves sessions
+  - builds prompt windows
+  - synchronizes compaction, todos, retry/revert, and long-checklist state
+- `session/processor.py`
+  - the main think-act loop
+  - consumes model output, executes tool calls, appends tool results, and decides when a turn should stop
+- `tools/registry.py`
+  - single entry point for tool execution
+  - applies permission checks, lifecycle events, truncation, and structured result wrapping
+- `permission/policy.py`
+  - session-scoped ask-before-act policy
+  - merges builtin agent rules, persisted `always` approvals, and YOLO behavior
+- `session/store.py`
+  - atomic session persistence on disk
+  - the durable source for messages, todos, permission state, summaries, and runtime metadata
+
+At runtime the main control flow is:
+
+1. CLI receives user input and loads the active session.
+2. `AgentRuntime.run_turn()` appends the user message, may auto-route / auto-delegate, and builds a prompt window.
+3. `SessionProcessor.process()` calls the provider, receives assistant text/tool calls, executes tools via `ToolRegistry`, and appends structured tool messages.
+4. `AgentRuntime` validates long checklist tasks, updates runtime metadata, persists the final turn, and emits JSONL events.
+5. Subsequent turns rebuild context from persisted session state rather than transient memory.
+
+The main persisted state flows are:
+
+- messages / parts
+  - `domain/messages.py`
+  - `session/message_v2.py`
+- session / status / todos / permission
+  - `domain/session.py`
+  - `session/store.py`
+- event stream
+  - `events/bus.py`
+  - `.openagent/logs/<session_id>.jsonl`
+
+The main runtime state flows are:
+
+- active agent
+  - `agent/registry.py`
+  - `agent/routing.py`
+  - `agent/runtime.py`
+- prompt / compaction / summary
+  - `session/prompt.py`
+  - `session/compaction.py`
+  - `session/summary.py`
+- tool execution / permission / truncation
+  - `tools/registry.py`
+  - `permission/policy.py`
+  - `tools/truncation.py`
+
 ## Run
 
 ```bash
@@ -210,6 +271,71 @@ Expected behavior:
 - `.openagent/logs/<session_id>.jsonl` contains `model.stream.event`
 - `.openagent/logs/<session_id>.jsonl` contains `processor.part.appended`
 - the persisted assistant message still contains a merged `text` part and a normal final `finish`
+
+## Validation Recipes
+
+Recommended CLI validation order:
+
+1. Single-step lookup
+```text
+请定位 `src/openagent/tools/registry.py` 中负责工具权限检查的函数，只返回函数名和一句用途说明。
+```
+
+2. Single-task multi-step fix
+```text
+请在 `work/audit_demo` 下完成一个完整的单任务多步骤流程：
+1. 创建 `math_utils.py`，内容是 `def add(a, b): return a - b`
+2. 创建 `test_math_utils.py`，断言 `add(2, 3) == 5`
+3. 运行这个目录下的 pytest，只先告诉我失败原因，不要修复
+```
+
+3. Same-session follow-up repair
+```text
+请直接修复这个 bug，并重新运行 `work/audit_demo` 下的 pytest；最后只告诉我是否通过。
+```
+
+4. Long checklist execution
+```text
+请完成下面这个多步任务，严格按顺序执行，并在最后只给我一个简短总结：
+
+1. 创建目录 `work/checklist_demo/docs`、`work/checklist_demo/config`、`work/checklist_demo/output`。
+2. 创建文件 `work/checklist_demo/docs/README.md`，内容为：
+# Checklist Demo
+
+- alpha
+- beta
+- delegate subtask
+3. 创建文件 `work/checklist_demo/config/app.json`，内容为：
+{
+  "mode": "test",
+  "name": "checklist_demo"
+}
+4. 将 `work/checklist_demo/config/app.json` 中的 `"mode": "test"` 修改为 `"mode": "production"`。
+5. 请把下面任务委托给子代理完成：创建文件 `work/checklist_demo/output/subtask.txt`，内容为 `delegated-ok`。
+6. 最后读取这三个文件并只告诉我三件事：
+   - README 是否含 delegate subtask
+   - mode 是否为 production
+   - 子代理是否成功
+```
+
+5. Failure recovery
+```text
+再做一个失败恢复测试：
+1. 先读取 `work/audit_demo/recover_target.txt`
+2. 如果失败，解释原因
+3. 然后创建这个文件，内容为 `recovered`
+4. 再次读取并只回复最终内容
+```
+
+After long checklist runs, use `/todos`, `/status`, `/inspect`, and `/replay` to verify persisted progress and runtime history.
+
+## Current Limits
+
+- Routing is heuristic rather than model-native planning; it works for common plan/build/explore prompts but is not yet a full workflow engine.
+- Checklist extraction is optimized for numbered file/dir/edit tasks; highly implicit natural-language workflows may still need another continuation round.
+- Hidden agents (`title`, `summary`, `compaction`, `generate`) are functional but simpler than OpenCode’s richer internal service stack.
+- `lsp` is still a lightweight local fallback, not a full persistent language-server client.
+- Tool permissions are session-scoped and consistent across delegated agents, but the UX is still CLI-centric rather than a richer approval UI.
 
 ## Session Runtime
 

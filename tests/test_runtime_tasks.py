@@ -6,6 +6,7 @@ from openagent.domain.messages import AgentResponse, ToolCall
 from openagent.providers.base import BaseProvider
 from openagent.session.manager import SessionManager
 from openagent.session.store import SessionStore
+from openagent.session.task_validation import parse_multistep_requirements
 
 
 class ScenarioProvider(BaseProvider):
@@ -366,7 +367,6 @@ def test_runtime_stops_after_final_multistep_verification_reads(tmp_path: Path):
 
 def test_checklist_creation_step_remains_completed_after_later_edit(tmp_path: Path):
     from openagent.domain.messages import Message
-    from openagent.session.task_validation import parse_multistep_requirements
 
     runtime = build_runtime(tmp_path, ScenarioProvider("create_file"))
     prompt = (
@@ -404,3 +404,57 @@ def test_runtime_preserves_auto_checklist_when_model_writes_matching_todos(tmp_p
 
     assert all(todo.source == "auto-checklist" for todo in runtime.session.todos)
     assert all(todo.status == "completed" for todo in runtime.session.todos)
+
+
+def test_parse_multistep_supports_create_this_file_reference():
+    prompt = (
+        "1. 先读取 `work/audit_demo/does_not_exist.txt`\n"
+        "2. 如果失败，解释原因\n"
+        "3. 然后创建这个文件，内容为 `recovered`\n"
+        "4. 再次读取并只回复最终内容\n"
+    )
+    requirements = parse_multistep_requirements(prompt)
+    assert requirements.final_files["work/audit_demo/does_not_exist.txt"] == "recovered"
+
+
+def test_request_requires_tool_ignores_planning_only_text():
+    assert AgentRuntime._request_requires_tool("先分析最合理的修复方案，不要修改代码。只说明应改哪一行以及为什么。") is False
+    assert AgentRuntime._request_requires_tool("请读取 README.md 并只说明前两行。") is True
+
+
+def test_runtime_multistep_recovery_returns_final_content(tmp_path: Path):
+    class RecoveryProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="r1", name="read_file", arguments={"path": "work/audit_demo/recover_target.txt"})],
+                    finish="tool-calls",
+                )
+            if self.calls == 2:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="r2", name="ensure_dir", arguments={"path": "work/audit_demo"})],
+                    finish="tool-calls",
+                )
+            if self.calls == 3:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="r3", name="write_file", arguments={"path": "work/audit_demo/recover_target.txt", "content": "recovered"})],
+                    finish="tool-calls",
+                )
+            return AgentResponse(
+                tool_calls=[ToolCall(id="r4", name="read_file", arguments={"path": "work/audit_demo/recover_target.txt"})],
+                finish="tool-calls",
+            )
+
+    runtime = build_runtime(tmp_path, RecoveryProvider())
+    reply = runtime.run_turn(
+        "再做一个失败恢复测试：\n"
+        "1. 先读取 `work/audit_demo/recover_target.txt`\n"
+        "2. 如果失败，解释原因\n"
+        "3. 然后创建这个文件，内容为 `recovered`\n"
+        "4. 再次读取并只回复最终内容\n"
+    )
+    assert reply == "recovered"
