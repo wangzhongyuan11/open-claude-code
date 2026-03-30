@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 
 from openagent.agent.profile import AgentProfile
+from openagent.permission.models import PermissionRule
 
 
 RESERVED_AGENT_NAMES = {
@@ -54,6 +55,7 @@ def build_safe_profile_from_generated(
 
     mode = "all"
     allowed_tools = None
+    permission_rules: list[PermissionRule] = []
     if any(token in lowered for token in ["subagent", "子代理", "委派", "delegated", "delegate"]):
         mode = "subagent"
     if any(token in lowered for token in ["primary", "主代理", "main agent"]):
@@ -94,6 +96,31 @@ def build_safe_profile_from_generated(
             "batch",
             "background_task",
         }
+        for tool in {
+            "ensure_dir",
+            "write_file",
+            "write",
+            "append_file",
+            "edit_file",
+            "edit",
+            "replace_all",
+            "insert_text",
+            "multiedit",
+            "apply_patch",
+            "patch",
+            "bash",
+            "background_task",
+            "todowrite",
+        }:
+            permission_rules.append(
+                PermissionRule(
+                    agent=identifier,
+                    permission=f"tool.{tool}",
+                    pattern="*",
+                    action="deny",
+                    source="generated-readonly",
+                )
+            )
 
     inherits_default_prompt = not readonly_signal
     if readonly_signal and "do not modify" not in prompt.lower() and "不要修改" not in prompt:
@@ -108,4 +135,5 @@ def build_safe_profile_from_generated(
         steps=10,
         inherits_default_prompt=inherits_default_prompt,
         allowed_tools=allowed_tools,
+        permission_rules=permission_rules,
     )

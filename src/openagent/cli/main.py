@@ -17,6 +17,7 @@ SHELL_COMMANDS = {
     "/summary",
     "/inspect",
     "/replay",
+    "/yolo",
     "/compact",
     "/revert",
     "/retry",
@@ -32,6 +33,9 @@ HELP_TEXT = """Available interactive commands:
 /summary                  Print a PR-style conversation summary
 /inspect                  Print a structured JSON inspect view
 /replay                   Print a turn-by-turn replay view
+/yolo                     Print YOLO mode status
+/yolo on                  Enable YOLO mode (auto-approve ask permissions, deny still applies)
+/yolo off                 Disable YOLO mode
 /compact                  Force a compaction pass if needed
 /revert                   Remove the last user turn and its assistant/tool results
 /retry                    Re-run the last user turn
@@ -63,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--replay", action="store_true", help="Print a turn-by-turn session replay view and exit")
     parser.add_argument("--prompt", default=None, help="Run one prompt and exit")
     parser.add_argument("--stream", action="store_true", help="Render assistant text deltas while the model is responding")
+    parser.add_argument("--yolo", action="store_true", help="Enable YOLO mode for this runtime")
     return parser
 
 
@@ -113,6 +118,31 @@ def _question_handler(questions: list[dict[str, Any]]) -> list[str]:
     return answers
 
 
+def _permission_handler(request) -> str:
+    print("[permission] Tool requires approval before execution.")
+    print(f"  agent: {request.agent_name}")
+    print(f"  tool: {request.tool_name}")
+    print(f"  permission: {request.permission}")
+    print(f"  target: {request.pattern}")
+    if request.metadata:
+        preview = request.metadata.get("command") or request.metadata.get("target_agent") or request.metadata.get("kind")
+        if preview:
+            print(f"  detail: {preview}")
+    while True:
+        try:
+            answer = input("approve [o]nce / [a]lways / [r]eject > ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return "reject"
+        if answer in {"o", "once"}:
+            return "once"
+        if answer in {"a", "always"}:
+            return "always"
+        if answer in {"r", "reject", "n", "no"}:
+            return "reject"
+        print("Please answer with once, always, or reject.")
+
+
 def _read_repl_input() -> tuple[str, str] | None:
     buffer: list[str] = []
     while True:
@@ -129,7 +159,7 @@ def _read_repl_input() -> tuple[str, str] | None:
                 continue
             if stripped in {"/exit", "exit", "quit"}:
                 return ("command", "/exit")
-            if stripped in SHELL_COMMANDS or stripped.startswith("/todo ") or stripped.startswith("/agent "):
+            if stripped in SHELL_COMMANDS or stripped.startswith("/todo ") or stripped.startswith("/agent ") or stripped.startswith("/yolo "):
                 return ("command", stripped)
         if stripped == "/cancel":
             print("[cancelled]")
@@ -159,8 +189,10 @@ def main() -> None:
         workspace=args.workspace,
         session_id=args.session_id,
         agent_name=args.agent,
+        yolo=args.yolo,
     )
     runtime.set_question_handler(_question_handler)
+    runtime.set_permission_handler(_permission_handler)
 
     if args.print_session:
         _print_session_summary(runtime)
@@ -233,6 +265,12 @@ def main() -> None:
             continue
         if item_type == "command" and user_input == "/replay":
             print(runtime.replay_session())
+            continue
+        if item_type == "command" and user_input == "/yolo":
+            print(runtime.status_report())
+            continue
+        if item_type == "command" and user_input in {"/yolo on", "/yolo off"}:
+            print(runtime.set_yolo_mode(user_input.endswith("on")))
             continue
         if item_type == "command" and user_input == "/compact":
             print(runtime.compact_session())

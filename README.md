@@ -105,6 +105,9 @@ Interactive commands:
 - `/summary`
 - `/inspect`
 - `/replay`
+- `/yolo`
+- `/yolo on`
+- `/yolo off`
 - `/compact`
 - `/revert`
 - `/retry`
@@ -144,6 +147,12 @@ Interactive command reference:
   - prints a structured JSON view of recent messages, parts, and metadata
 - `/replay`
   - prints a human-readable turn-by-turn replay
+- `/yolo`
+  - prints the current runtime status JSON, including whether YOLO mode is enabled
+- `/yolo on`
+  - enables YOLO mode for the current session/runtime; ask-class permissions are auto-approved but explicit deny rules still block execution
+- `/yolo off`
+  - disables YOLO mode so sensitive tool calls return to ask-before-act behavior
 - `/compact`
   - forces a compaction pass if the session can be summarized further
 - `/revert`
@@ -487,6 +496,21 @@ Background task runtime notes:
 - full command output is persisted in `.openagent/sessions/<session_id>/background_outputs/<task_id>.log`
 - completion updates are appended back into session history as `session-op` messages carrying `background-task` parts
 - subsequent turns refresh the session from disk before prompt construction, so the model can see newly completed background work
+
+## Permission Runtime
+
+The tool runtime now enforces a session-scoped permission model before each tool invocation.
+
+- each agent can carry its own `permission_rules`
+- permission decisions are evaluated centrally in [`registry.py`](/root/open-claude-code/src/openagent/tools/registry.py)
+- ask-before-act replies support:
+  - `once`
+  - `always`
+  - `reject`
+- `always` writes a reusable approval rule into the current session
+- YOLO mode auto-approves `ask` decisions but still preserves explicit `deny` rules
+- permission asks and replies are appended into session history as `session-op` messages carrying `permission` parts
+- delegated subagents reuse the same session-scoped permission state, so approvals and denies remain consistent across `task` / `delegate`
 
 ## Manual Validation Tasks
 

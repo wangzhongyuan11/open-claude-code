@@ -22,6 +22,7 @@ from openagent.events.bus import EventBus
 from openagent.events.logger import get_logger
 from openagent.providers.base import BaseProvider
 from openagent.providers.factory import build_provider
+from openagent.permission.policy import SessionPermissionPolicy
 from openagent.session.manager import SessionManager
 from openagent.session.background import BackgroundTaskManager
 from openagent.session.inspect import format_session_inspect, format_session_replay
@@ -92,12 +93,16 @@ class AgentRuntime:
         self.provider_factory = provider_factory or (lambda profile=None: provider)
         self.provider = provider
         self.question_handler: Callable[[list[dict[str, Any]]], list[str]] | None = None
+        self.permission_handler: Callable[[Any], str] | None = None
         self.background_tasks = BackgroundTaskManager(
             store=self.session_manager.store,
             workspace=self.workspace,
             event_bus=self.event_bus,
         )
+        self.session.permission.setdefault("rules", [])
+        self.session.permission.setdefault("yolo", self.settings.yolo_mode)
         self.session.metadata["active_agent"] = self.agent_profile.name
+        self.session.metadata["yolo_mode"] = "true" if self.session.permission.get("yolo", self.settings.yolo_mode) else "false"
         self.session.touch()
         self.session_manager.store.save(self.session)
         if self.hidden_agents_enabled:
@@ -114,6 +119,7 @@ class AgentRuntime:
                 agent_name=self.agent_profile.name,
                 event_bus=self.event_bus,
                 runtime_state=self._tool_runtime_state(self.agent_profile.name),
+                permission=dict(self.session.permission),
             ),
             event_bus=self.event_bus,
         )
@@ -171,6 +177,7 @@ class AgentRuntime:
                     )
             history = result.history
             new_messages = history[len(prompt_context.messages):]
+            self._refresh_session()
             self.session_manager.append_turn_messages(self.session, new_messages)
             self.session.metadata["last_finish_reason"] = result.finish_reason
             self.session.metadata["last_loop_unstable"] = "true" if result.unstable else "false"
@@ -201,6 +208,7 @@ class AgentRuntime:
             "session_id": self.session.id,
             "title": self.session.title,
             "active_agent": self.agent_profile.name,
+            "yolo_mode": self.session.metadata.get("yolo_mode", "true" if self.settings.yolo_mode else "false"),
             **status_payload(self.session),
             "summary_present": self.session.summary is not None,
             "compacted_message_count": self.session.summary.compacted_message_count if self.session.summary else 0,
@@ -250,6 +258,7 @@ class AgentRuntime:
             "steps": profile.steps,
             "inherits_default_prompt": profile.inherits_default_prompt,
             "allowed_tools": sorted(profile.allowed_tools) if profile.allowed_tools is not None else None,
+            "permission_rules": [rule.to_dict() for rule in profile.permission_rules],
             "prompt": profile.prompt,
         }
         if profile.model is not None:
@@ -278,6 +287,7 @@ class AgentRuntime:
                 agent_name=profile.name,
                 event_bus=self.event_bus,
                 runtime_state=self._tool_runtime_state(profile.name),
+                permission=dict(self.session.permission),
             ),
             event_bus=self.event_bus,
         )
@@ -340,6 +350,23 @@ class AgentRuntime:
         self.question_handler = handler
         self.loop.tool_context.runtime_state = self._tool_runtime_state(self.agent_profile.name)
 
+    def set_permission_handler(self, handler: Callable[[Any], str] | None) -> None:
+        self.permission_handler = handler
+        self.loop.tool_context.runtime_state = self._tool_runtime_state(self.agent_profile.name)
+
+    def set_yolo_mode(self, enabled: bool) -> str:
+        self.settings.yolo_mode = enabled
+        policy = getattr(self.registry, "_permission_policy", None)
+        if isinstance(policy, SessionPermissionPolicy):
+            policy.set_yolo(self.session.id, enabled)
+        else:
+            self.session.permission["yolo"] = enabled
+            self.session.metadata["yolo_mode"] = "true" if enabled else "false"
+            self.session.touch()
+            self.session_manager.store.save(self.session)
+        self._refresh_session()
+        return f"YOLO mode {'enabled' if enabled else 'disabled'}."
+
     def _build_subagent_manager(self) -> SubagentManager:
         return SubagentManager(
             provider_factory=self.provider_factory,
@@ -348,10 +375,19 @@ class AgentRuntime:
             prompt_factory=self._system_prompt_for_agent_name,
             profile_lookup=self.agent_registry.get,
             event_bus=self.event_bus,
+            session_id_factory=lambda: self.session.id,
+            runtime_state_factory=self._tool_runtime_state,
         )
 
-    def _build_registry(self) -> ToolRegistry:
-        registry = ToolRegistry()
+    def _build_registry(self, profile: AgentProfile | None = None) -> ToolRegistry:
+        active_profile = profile or self.agent_profile
+        policy = SessionPermissionPolicy(
+            self.session_manager.store,
+            active_profile,
+            yolo=self.session.permission.get("yolo", self.settings.yolo_mode),
+            event_bus=self.event_bus,
+        )
+        registry = ToolRegistry(permission_policy=policy)
         registry.register(ReadFileTool())
         registry.register(ReadFileRangeTool())
         registry.register(ReadTool())
@@ -387,10 +423,16 @@ class AgentRuntime:
         return registry
 
     def _build_registry_for_profile(self, profile: AgentProfile) -> ToolRegistry:
-        registry = self._build_registry()
+        registry = self._build_registry(profile)
         if profile.allowed_tools is None:
             return registry
-        filtered = ToolRegistry()
+        policy = SessionPermissionPolicy(
+            self.session_manager.store,
+            profile,
+            yolo=self.session.permission.get("yolo", self.settings.yolo_mode),
+            event_bus=self.event_bus,
+        )
+        filtered = ToolRegistry(permission_policy=policy)
         for name in profile.allowed_tools:
             try:
                 filtered.register(registry.get(name))
@@ -403,6 +445,7 @@ class AgentRuntime:
         return self._build_registry_for_profile(profile)
 
     def _tool_runtime_state(self, agent_name: str) -> dict[str, Any]:
+        permission_handler = self.permission_handler or (lambda _request: "once")
         return {
             "mode": "runtime",
             "session": self.session,
@@ -412,19 +455,25 @@ class AgentRuntime:
             "invoke_tool": self._invoke_tool_from_runtime,
             "question_handler_available": str(self.question_handler is not None).lower(),
             "ask_questions": self.question_handler,
+            "ask_permission": permission_handler,
             "skill_roots": self._skill_roots(),
             "agent_name": agent_name,
             "active_agent": self.agent_profile.name,
             "agent_registry": self.agent_registry,
+            "yolo_mode": self.session.metadata.get("yolo_mode", "true" if self.settings.yolo_mode else "false"),
+            "permission_state": self.session.permission,
         }
 
     def _refresh_session(self) -> None:
         self.session = self.session_manager.store.load(self.session.id)
+        self.session.permission.setdefault("rules", [])
+        self.session.permission.setdefault("yolo", self.settings.yolo_mode)
         self.loop.tool_context.session_id = self.session.id
         active_name = self.session.metadata.get("active_agent") or self.agent_profile.name
         self.agent_profile = self.agent_registry.get(active_name)
         self.loop.tool_context.agent_name = self.agent_profile.name
         self.loop.tool_context.runtime_state = self._tool_runtime_state(self.agent_profile.name)
+        self.loop.tool_context.permission = dict(self.session.permission)
 
     def _set_todos(self, todos: list) -> None:
         self.session.todos = todos
@@ -441,6 +490,7 @@ class AgentRuntime:
             agent_name=agent_name,
             event_bus=self.event_bus,
             runtime_state=self._tool_runtime_state(agent_name),
+            permission=dict(self.session.permission),
         )
         if parent_context and parent_context.metadata:
             context.metadata.update(parent_context.metadata)
@@ -608,6 +658,7 @@ class AgentRuntime:
                 Part(type="text", content=result.summary),
             ],
         )
+        self._refresh_session()
         self.session_manager.append_turn_messages(self.session, [handoff, reply])
         self.session.metadata["last_finish_reason"] = "stop"
         self.session.metadata["last_loop_unstable"] = "false"
@@ -732,8 +783,11 @@ def build_default_runtime(
     session_id: str | None = None,
     session_root: str | Path | None = None,
     agent_name: str | None = None,
+    yolo: bool | None = None,
 ) -> AgentRuntime:
     settings = Settings.from_workspace(workspace)
+    if yolo is not None:
+        settings.yolo_mode = yolo
     workspace_path = settings.workspace
     manager = build_session_manager(workspace=workspace_path, session_root=session_root or settings.session_root)
     session = manager.start(workspace=workspace_path, session_id=session_id)

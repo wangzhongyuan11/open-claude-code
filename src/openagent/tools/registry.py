@@ -9,6 +9,7 @@ from openagent.domain.events import Event
 from openagent.domain.tools import ToolContext, ToolExecutionResult, ToolSpec
 from openagent.extensions.base import ExtensionContext, PermissionPolicy
 from openagent.extensions.defaults import AllowAllPolicy
+from openagent.permission.models import PermissionReply, PermissionRequest
 from openagent.tools.base import BaseTool
 from openagent.tools.truncation import apply_output_truncation
 
@@ -74,7 +75,18 @@ class ToolRegistry:
                 tool_context=context,
             )
         )
-        if not decision.allowed:
+        if decision.action == "ask" and decision.request is not None:
+            approval = self._resolve_permission_approval(context, decision.request)
+            if approval == "reject":
+                result = ToolExecutionResult.failure(
+                    "permission rejected by user",
+                    error_type="permission_rejected",
+                    hint="Try a narrower request or ask the user to approve the action.",
+                    metadata={"tool": name},
+                )
+                self._emit_result(context, name, result, started)
+                return result
+        elif not decision.allowed:
             result = ToolExecutionResult.failure(
                 decision.reason or "permission denied",
                 error_type="permission_denied",
@@ -132,6 +144,36 @@ class ToolRegistry:
             )
         self._emit_result(context, name, result, started)
         return result
+
+    def _resolve_permission_approval(self, context: ToolContext, request: PermissionRequest) -> PermissionReply:
+        if hasattr(self._permission_policy, "record_request"):
+            self._permission_policy.record_request(request)
+        yolo = str(context.runtime_state.get("yolo_mode", "false")).lower() == "true"
+        if yolo:
+            if hasattr(self._permission_policy, "record_reply"):
+                self._permission_policy.record_reply(request, "once", yolo=True)
+            self._emit(
+                context,
+                "permission.auto_approved",
+                {
+                    "session_id": request.session_id,
+                    "request_id": request.id,
+                    "tool_name": request.tool_name,
+                    "pattern": request.pattern,
+                },
+            )
+            return "once"
+        asker = context.runtime_state.get("ask_permission")
+        if not callable(asker):
+            if hasattr(self._permission_policy, "record_reply"):
+                self._permission_policy.record_reply(request, "reject", yolo=False)
+            return "reject"
+        reply = asker(request)
+        if reply not in {"once", "always", "reject"}:
+            reply = "reject"
+        if hasattr(self._permission_policy, "record_reply"):
+            self._permission_policy.record_reply(request, reply, yolo=False)
+        return reply
 
     def _available_registrations(self, context: ToolContext | None) -> list[ToolRegistration]:
         available: list[ToolRegistration] = []

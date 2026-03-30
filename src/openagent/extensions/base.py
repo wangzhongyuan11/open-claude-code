@@ -4,12 +4,15 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from openagent.domain.tools import ToolContext
+from openagent.permission.models import PermissionRequest
 
 
 @dataclass(slots=True)
 class PermissionDecision:
     allowed: bool
+    action: str = "allow"
     reason: str = ""
+    request: PermissionRequest | None = None
 
 
 @dataclass(slots=True)

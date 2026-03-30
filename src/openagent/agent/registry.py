@@ -14,6 +14,7 @@ from openagent.agent.prompts import (
 )
 from openagent.agent.store import AgentStore
 from openagent.config.settings import Settings
+from openagent.permission.models import PermissionRule
 
 
 class AgentRegistry:
@@ -88,6 +89,13 @@ def build_agent_registry(settings: Settings, store: AgentStore | None = None) ->
             prompt=PROMPT_PLAN,
             allowed_tools=plan_tools,
             steps=10,
+            permission_rules=[
+                PermissionRule(agent="plan", permission="tool.write*", pattern="*", action="deny", source="builtin-plan"),
+                PermissionRule(agent="plan", permission="tool.edit*", pattern="*", action="deny", source="builtin-plan"),
+                PermissionRule(agent="plan", permission="tool.ensure_dir", pattern="*", action="deny", source="builtin-plan"),
+                PermissionRule(agent="plan", permission="tool.bash", pattern="*", action="deny", source="builtin-plan"),
+                PermissionRule(agent="plan", permission="tool.background_task*", pattern="*", action="deny", source="builtin-plan"),
+            ],
         ),
         "general": AgentProfile(
             name="general",
@@ -103,6 +111,13 @@ def build_agent_registry(settings: Settings, store: AgentStore | None = None) ->
             prompt=PROMPT_EXPLORE,
             allowed_tools=readonly_tools,
             steps=8,
+            permission_rules=[
+                PermissionRule(agent="explore", permission="tool.write*", pattern="*", action="deny", source="builtin-explore"),
+                PermissionRule(agent="explore", permission="tool.edit*", pattern="*", action="deny", source="builtin-explore"),
+                PermissionRule(agent="explore", permission="tool.ensure_dir", pattern="*", action="deny", source="builtin-explore"),
+                PermissionRule(agent="explore", permission="tool.bash", pattern="*", action="deny", source="builtin-explore"),
+                PermissionRule(agent="explore", permission="tool.background_task*", pattern="*", action="deny", source="builtin-explore"),
+            ],
         ),
         "compaction": AgentProfile(
             name="compaction",

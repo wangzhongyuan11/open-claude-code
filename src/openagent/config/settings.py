@@ -20,6 +20,7 @@ class Settings:
     compact_max_messages: int = 20
     prompt_recent_messages: int = 12
     prompt_max_tokens: int = 12000
+    yolo_mode: bool = False
 
     @classmethod
     def from_workspace(cls, workspace: str | Path) -> "Settings":
@@ -39,6 +40,7 @@ class Settings:
         compact_max_messages = int(os.getenv("OPENAGENT_COMPACT_MAX_MESSAGES", "20"))
         prompt_recent_messages = int(os.getenv("OPENAGENT_PROMPT_RECENT_MESSAGES", "12"))
         prompt_max_tokens = int(os.getenv("OPENAGENT_PROMPT_MAX_TOKENS", "12000"))
+        yolo_mode = os.getenv("OPENAGENT_YOLO", "false").lower() in {"1", "true", "yes", "on"}
         return cls(
             workspace=workspace_path,
             session_root=state_root / "sessions",
@@ -53,4 +55,5 @@ class Settings:
             compact_max_messages=compact_max_messages,
             prompt_recent_messages=prompt_recent_messages,
             prompt_max_tokens=prompt_max_tokens,
+            yolo_mode=yolo_mode,
         )

@@ -5,4 +5,4 @@ from openagent.extensions.base import ExtensionContext, PermissionDecision, Perm
 
 class AllowAllPolicy(PermissionPolicy):
     def check(self, context: ExtensionContext) -> PermissionDecision:
-        return PermissionDecision(allowed=True)
+        return PermissionDecision(allowed=True, action="allow")

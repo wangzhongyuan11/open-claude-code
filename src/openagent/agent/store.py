@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from openagent.agent.profile import AgentProfile
 from openagent.domain.messages import ModelRef
+from openagent.permission.models import PermissionRule
 
 
 class AgentStore:
@@ -33,6 +35,11 @@ class AgentStore:
             frontmatter["model"] = profile.model.model_id
         if profile.allowed_tools is not None:
             frontmatter["allowed_tools"] = ",".join(sorted(profile.allowed_tools))
+        if profile.permission_rules:
+            frontmatter["permission_rules_json"] = json.dumps(
+                [rule.to_dict() for rule in profile.permission_rules],
+                ensure_ascii=False,
+            )
         lines = ["---"]
         for key, value in frontmatter.items():
             if value == "":
@@ -77,6 +84,12 @@ class AgentStore:
         allowed_tools = None
         if metadata.get("allowed_tools"):
             allowed_tools = {item.strip() for item in metadata["allowed_tools"].split(",") if item.strip()}
+        permission_rules: list[PermissionRule] = []
+        if metadata.get("permission_rules_json"):
+            try:
+                permission_rules = [PermissionRule.from_dict(item) for item in json.loads(metadata["permission_rules_json"])]
+            except Exception:
+                permission_rules = []
         return AgentProfile(
             name=metadata.get("name") or path.stem,
             description=metadata.get("description", ""),
@@ -91,5 +104,6 @@ class AgentStore:
             steps=int(metadata["steps"]) if metadata.get("steps") else None,
             inherits_default_prompt=metadata.get("inherits_default_prompt", "true").lower() == "true",
             allowed_tools=allowed_tools,
+            permission_rules=permission_rules,
             native=False,
         )

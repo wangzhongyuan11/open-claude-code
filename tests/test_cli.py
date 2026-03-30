@@ -52,3 +52,12 @@ def test_repl_reader_cancel_discards_buffer(monkeypatch):
     item = _read_repl_input()
 
     assert item == ("command", "/status")
+
+
+def test_repl_reader_treats_yolo_toggle_as_command(monkeypatch):
+    inputs = iter(["/yolo on"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(inputs))
+
+    item = _read_repl_input()
+
+    assert item == ("command", "/yolo on")

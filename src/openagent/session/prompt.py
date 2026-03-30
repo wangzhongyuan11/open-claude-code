@@ -56,6 +56,7 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
     retry_notes: list[str] = []
     background_notes: list[str] = []
     agent_notes: list[str] = []
+    permission_notes: list[str] = []
     for message in messages[-6:]:
         if message.role == "assistant" and message.finish:
             recent_turns.append(f"assistant finish={message.finish}")
@@ -105,7 +106,19 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
                 if summary:
                     line += f" summary={summary}"
                 background_notes.append(line)
-    if not tool_states and not recent_files and not recent_turns and not recent_patches and not recent_snapshots and not retry_notes and not background_notes and not agent_notes:
+            elif part.type == "permission" and isinstance(part.content, dict):
+                tool_name = part.content.get("tool_name")
+                reply = part.content.get("reply")
+                pattern = part.content.get("pattern")
+                status = part.state.get("status")
+                if tool_name:
+                    line = f"{tool_name} -> {pattern}"
+                    if reply:
+                        line += f" reply={reply}"
+                    if status:
+                        line += f" status={status}"
+                    permission_notes.append(line)
+    if not tool_states and not recent_files and not recent_turns and not recent_patches and not recent_snapshots and not retry_notes and not background_notes and not agent_notes and not permission_notes:
         return None
     lines = ["[Runtime Context]"]
     lines.append(
@@ -142,6 +155,9 @@ def build_context_note(plan: CompactionPlan) -> Message | None:
     if agent_notes:
         lines.append("Agent handoffs:")
         lines.extend(f"- {item}" for item in _dedupe(agent_notes)[-6:])
+    if permission_notes:
+        lines.append("Recent permissions:")
+        lines.extend(f"- {item}" for item in _dedupe(permission_notes)[-6:])
     text = "\n".join(lines)
     return Message(
         role="assistant",

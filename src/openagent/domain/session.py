@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 from datetime import UTC, datetime
 
 from openagent.domain.messages import Message
@@ -48,7 +49,7 @@ class Session:
     updated_at: str = field(default_factory=utc_now_iso)
     messages: list[Message] = field(default_factory=list)
     metadata: dict[str, str] = field(default_factory=dict)
-    permission: dict[str, str] = field(default_factory=dict)
+    permission: dict[str, Any] = field(default_factory=dict)
     summary: SessionSummary | None = None
     status: SessionStatus = field(default_factory=SessionStatus)
     todos: list[SessionTodo] = field(default_factory=list)

@@ -18,6 +18,8 @@ ProviderFactory = Callable[[str | None], BaseProvider]
 RegistryFactory = Callable[[str], ToolRegistry]
 PromptFactory = Callable[[str], str]
 ProfileLookup = Callable[[str], AgentProfile]
+SessionIDFactory = Callable[[], str]
+RuntimeStateFactory = Callable[[str], dict]
 
 
 @dataclass(slots=True)
@@ -37,6 +39,8 @@ class SubagentManager:
         workspace: Path,
         prompt_factory: PromptFactory | None = None,
         profile_lookup: ProfileLookup | None = None,
+        session_id_factory: SessionIDFactory | None = None,
+        runtime_state_factory: RuntimeStateFactory | None = None,
         system_prompt: str | None = None,
         event_bus: EventBus | None = None,
     ) -> None:
@@ -47,6 +51,8 @@ class SubagentManager:
         self.profile_lookup = profile_lookup or (
             lambda agent_name: AgentProfile(name=agent_name, mode="subagent", prompt=None, steps=8)
         )
+        self.session_id_factory = session_id_factory or (lambda: "subagent")
+        self.runtime_state_factory = runtime_state_factory or (lambda _agent: {})
         self.event_bus = event_bus
 
     def run(self, prompt: str, agent_name: str = "general", max_steps: int | None = None) -> SubagentResult:
@@ -62,13 +68,14 @@ class SubagentManager:
         except TypeError:
             registry = self.registry_factory()  # type: ignore[misc]
         loop = AgentLoop(
-            provider=provider,
+                provider=provider,
             tool_registry=registry,
             tool_context=ToolContext(
                 workspace=self.workspace,
-                session_id="subagent",
+                session_id=self.session_id_factory(),
                 agent_name=profile.name,
                 event_bus=self.event_bus,
+                runtime_state=self.runtime_state_factory(profile.name),
                 metadata={"agent": profile.name},
             ),
             event_bus=self.event_bus,

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from openagent.domain.messages import ModelRef
+from openagent.permission.models import PermissionRule
 
 
 AgentMode = Literal["primary", "subagent", "all"]
@@ -25,6 +26,7 @@ class AgentProfile:
     steps: int | None = None
     inherits_default_prompt: bool = True
     allowed_tools: set[str] | None = None
+    permission_rules: list[PermissionRule] = field(default_factory=list)
     options: dict[str, Any] = field(default_factory=dict)
 
     def supports_primary(self) -> bool:

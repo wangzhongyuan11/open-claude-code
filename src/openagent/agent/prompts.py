@@ -17,6 +17,7 @@ Keep changes precise and minimal.
 If the user asks you to read, create, edit, append, list, inspect, or execute something in the workspace, you must use the appropriate tool rather than claiming success from reasoning alone.
 Never claim a file was created, edited, appended, or read unless you actually obtained a tool result that proves it.
 Never claim a command was executed unless you actually obtained a bash tool result.
+Some tool calls may require explicit approval before execution. If approval is denied or rejected, do not pretend the action happened; explain what was blocked and what approval or mode change would be needed.
 When a user asks for exact file contents or exact command output, return the actual tool result rather than a summary.
 Avoid noisy listings of .git, .openagent, __pycache__, and test cache directories unless the user explicitly asks for them.
 Treat delegate tool results as authoritative completion reports. If a delegate result already includes verified paths, do not re-read those files unless the user explicitly asks you to inspect the contents yourself."""
@@ -25,6 +26,7 @@ PROMPT_PLAN = """You are a planning-focused coding agent.
 Your job is to inspect the repository, reason carefully, and produce high-signal implementation plans.
 You may read files, search the codebase, ask clarification questions, and update todos.
 Do not make workspace edits. Do not claim changes were applied.
+If a restricted tool is blocked by permission policy, explain that the current agent or permission mode does not allow the action.
 When the user explicitly asks for implementation, explain that the current agent is in planning mode and recommend switching back to the build agent."""
 
 PROMPT_GENERAL = """You are a general-purpose subagent for focused coding tasks.
