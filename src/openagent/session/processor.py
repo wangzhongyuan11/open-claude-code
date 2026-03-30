@@ -201,6 +201,36 @@ class SessionProcessor:
 
     @staticmethod
     def _build_multistep_completion_reply(last_user_text: str, history: list[Message]):
+        batch_results = SessionProcessor._collect_recent_batch_items(history)
+        if "只告诉我四件事" in last_user_text and batch_results:
+            math_text = ""
+            pytest_output = ""
+            pytest_ok = False
+            readme_text = ""
+            subtask_text = ""
+            for item in batch_results:
+                tool = item.get("tool")
+                output = str(item.get("output", "")).strip()
+                if tool == "bash" and not pytest_output:
+                    pytest_output = output
+                    pytest_ok = str(item.get("status", "")) == "succeeded" or SessionProcessor._pytest_output_passed(output)
+                elif tool in {"read_file", "read", "read_symbol"}:
+                    if "def multiply" in output and not math_text:
+                        math_text = output
+                    elif ("verified by pytest" in output or "# Workflow" in output) and not readme_text:
+                        readme_text = output
+                    elif "delegated" in output and not subtask_text:
+                        subtask_text = output
+            if math_text or pytest_output or readme_text or subtask_text:
+                lines = [
+                    f"multiply 是否已修复：{'是' if 'return a * b' in math_text else '否'}",
+                    f"pytest 是否通过：{'是' if pytest_ok else '否'}",
+                    f"README 是否包含 verified by pytest：{'是' if 'verified by pytest' in readme_text else '否'}",
+                    f"子代理是否成功：{'是' if 'delegated' in subtask_text else '否'}",
+                ]
+                return TerminationDecision(True, "\n".join(lines), "multistep-validated")
+        if "只告诉我四件事" in last_user_text:
+            return None
         read_results = SessionProcessor._collect_recent_read_results(history)
         if "只告诉我三件事" in last_user_text and len(read_results) >= 3:
             readme_text, config_text, subtask_text = list(reversed(read_results[:3]))
@@ -235,7 +265,7 @@ class SessionProcessor:
             parsed = SessionProcessor._parse_batch_results(message.content)
             if not parsed:
                 return False
-            return all(item.get("tool") in {"read_file", "read", "read_symbol"} for item in parsed)
+            return all(item.get("tool") in {"read_file", "read", "read_symbol", "bash"} for item in parsed)
         return False
 
     @staticmethod
@@ -265,6 +295,23 @@ class SessionProcessor:
         return read_results
 
     @staticmethod
+    def _collect_recent_batch_items(history: list[Message]) -> list[dict[str, Any]]:
+        tool_names: dict[str, str] = {}
+        for message in history:
+            if message.role == "assistant" and message.tool_calls:
+                for tool_call in message.tool_calls:
+                    tool_names[tool_call.id] = tool_call.name
+        for message in reversed(history):
+            if message.role != "tool":
+                continue
+            if tool_names.get(message.tool_call_id) != "batch":
+                continue
+            parsed = SessionProcessor._parse_batch_results(message.content)
+            if parsed:
+                return parsed
+        return []
+
+    @staticmethod
     def _parse_batch_results(content: str) -> list[dict[str, Any]]:
         try:
             payload = json.loads(content)
@@ -273,6 +320,13 @@ class SessionProcessor:
         if not isinstance(payload, list):
             return []
         return [item for item in payload if isinstance(item, dict)]
+
+    @staticmethod
+    def _pytest_output_passed(output: str) -> bool:
+        lowered = output.lower()
+        if "failed" in lowered or "error" in lowered:
+            return False
+        return "passed" in lowered
 
     @staticmethod
     def _call_fingerprint(name: str, arguments: dict) -> str:

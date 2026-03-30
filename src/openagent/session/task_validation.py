@@ -41,6 +41,7 @@ def parse_multistep_requirements(user_text: str) -> MultiStepRequirements:
     req = MultiStepRequirements()
     step_blocks = _split_step_blocks(user_text)
     last_file_path: str | None = None
+    mutable_workflow = _looks_like_mutable_setup_workflow(user_text)
     for number, block in step_blocks:
         step = ChecklistStep(number=number, text=_step_text(block))
         if "创建目录" in block:
@@ -50,7 +51,8 @@ def parse_multistep_requirements(user_text: str) -> MultiStepRequirements:
             cleaned = _clean_block_content(content)
             step.created_files[path] = cleaned
             req.created_files[path] = cleaned
-            req.final_files[path] = cleaned
+            if not _should_skip_exact_final_content(path, mutable_workflow):
+                req.final_files[path] = cleaned
             last_file_path = path
         for path, old_text, new_text in _extract_replacements(block):
             step.replacements.append((path, old_text, new_text))
@@ -226,3 +228,18 @@ def _infer_last_file_reference(block: str) -> str | None:
         if path.suffix or "/" in item:
             return item
     return None
+
+
+def _looks_like_mutable_setup_workflow(user_text: str) -> bool:
+    lowered = user_text.lower()
+    return "pytest" in lowered and any(token in user_text for token in ("修复 bug", "修复后再次运行 pytest", "根据失败结果修复", "修复这个 bug"))
+
+
+def _should_skip_exact_final_content(path: str, mutable_workflow: bool) -> bool:
+    if not mutable_workflow:
+        return False
+    suffix = Path(path).suffix.lower()
+    if suffix not in {".py", ".ts", ".tsx", ".js", ".jsx"}:
+        return False
+    normalized = path.replace("\\", "/").lower()
+    return "/src/" in normalized or "/tests/" in normalized

@@ -456,6 +456,18 @@ def test_parse_multistep_dedents_indented_multiline_file_content():
     assert requirements.final_files["work/demo/docs/README.md"] == "# Checklist Demo\n\n- alpha\n- beta\n- delegate subtask"
 
 
+def test_parse_multistep_skips_exact_final_content_for_mutable_py_setup():
+    prompt = (
+        "1. 创建文件 `work/demo/src/math_ops.py`，内容为：\n"
+        "def multiply(a, b):\n    return a + b\n"
+        "2. 运行这个示例目录下的 pytest，并根据失败结果修复 bug。\n"
+        "3. 修复后再次运行 pytest，确认通过。\n"
+    )
+    requirements = parse_multistep_requirements(prompt)
+    assert "work/demo/src/math_ops.py" not in requirements.final_files
+    assert requirements.created_files["work/demo/src/math_ops.py"] == "def multiply(a, b):\n    return a + b"
+
+
 def test_request_requires_tool_ignores_planning_only_text():
     assert AgentRuntime._request_requires_tool("先分析最合理的修复方案，不要修改代码。只说明应改哪一行以及为什么。") is False
     assert AgentRuntime._request_requires_tool("请读取 README.md 并只说明前两行。") is True
@@ -562,3 +574,83 @@ def test_runtime_stops_after_final_batch_verification_reads(tmp_path: Path):
     assert "mode 是否为 production：是" in reply
     assert "子代理是否成功：是" in reply
     assert (tmp_path / "work/check/config/app.json").read_text(encoding="utf-8") != "broken"
+
+
+def test_runtime_builds_four_item_summary_from_batch_verification(tmp_path: Path):
+    class WorkflowProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(id="w1", name="ensure_dir", arguments={"path": "work/demo/src"}),
+                        ToolCall(id="w2", name="ensure_dir", arguments={"path": "work/demo/tests"}),
+                        ToolCall(id="w3", name="ensure_dir", arguments={"path": "work/demo/docs"}),
+                    ],
+                    finish="tool-calls",
+                )
+            if self.calls == 2:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(id="w4", name="write_file", arguments={"path": "work/demo/src/math_ops.py", "content": "def multiply(a, b):\n    return a + b"}),
+                        ToolCall(id="w5", name="write_file", arguments={"path": "work/demo/tests/test_math_ops.py", "content": "from math_ops import multiply\n\ndef test_multiply():\n    assert multiply(3, 4) == 12"}),
+                    ],
+                    finish="tool-calls",
+                )
+            if self.calls == 3:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="w6", name="bash", arguments={"command": f"cd {tmp_path / 'work/demo'} && PYTHONPATH=src pytest tests/test_math_ops.py -q"})],
+                    finish="tool-calls",
+                )
+            if self.calls == 4:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="w7", name="edit_file", arguments={"path": "work/demo/src/math_ops.py", "old_text": "return a + b", "new_text": "return a * b"})],
+                    finish="tool-calls",
+                )
+            if self.calls == 5:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(id="w8", name="bash", arguments={"command": f"cd {tmp_path / 'work/demo'} && PYTHONPATH=src pytest tests/test_math_ops.py -q"}),
+                        ToolCall(id="w9", name="write_file", arguments={"path": "work/demo/docs/README.md", "content": "# Workflow Demo\n\n- verified by pytest"}),
+                        ToolCall(id="w10", name="write_file", arguments={"path": "work/demo/docs/subtask_note.txt", "content": "delegated workflow note"}),
+                    ],
+                    finish="tool-calls",
+                )
+            return AgentResponse(
+                tool_calls=[
+                    ToolCall(id="w11", name="batch", arguments={"calls": [
+                        {"tool": "read_file", "arguments": {"path": "work/demo/src/math_ops.py"}},
+                        {"tool": "bash", "arguments": {"command": f"cd {tmp_path / 'work/demo'} && PYTHONPATH=src pytest tests/test_math_ops.py -q"}},
+                        {"tool": "read_file", "arguments": {"path": "work/demo/docs/README.md"}},
+                        {"tool": "read_file", "arguments": {"path": "work/demo/docs/subtask_note.txt"}},
+                    ]})
+                ],
+                finish="tool-calls",
+            )
+
+    runtime = build_runtime(tmp_path, WorkflowProvider())
+    reply = runtime.run_turn(
+        "1. 创建目录 `work/demo/src`、`work/demo/tests`、`work/demo/docs`。\n"
+        "2. 创建文件 `work/demo/src/math_ops.py`，内容为：\n"
+        "def multiply(a, b):\n    return a + b\n"
+        "3. 创建文件 `work/demo/tests/test_math_ops.py`，内容为：\n"
+        "from math_ops import multiply\n\n"
+        "def test_multiply():\n    assert multiply(3, 4) == 12\n"
+        "4. 运行这个示例目录下的 pytest，并根据失败结果修复 bug。\n"
+        "5. 修复后再次运行 pytest，确认通过。\n"
+        "6. 创建文件 `work/demo/docs/README.md`，内容为：\n"
+        "# Workflow Demo\n\n- verified by pytest\n"
+        "7. 请把下面任务委托给子代理完成：创建文件 `work/demo/docs/subtask_note.txt`，内容为 `delegated workflow note`\n"
+        "8. 最后读取以下三个目标并只告诉我四件事：\n"
+        "   - multiply 是否已修复\n"
+        "   - pytest 是否通过\n"
+        "   - README 是否包含 verified by pytest\n"
+        "   - 子代理是否成功\n"
+    )
+    assert "multiply 是否已修复：是" in reply
+    assert "pytest 是否通过：是" in reply
+    assert "README 是否包含 verified by pytest：是" in reply
+    assert "子代理是否成功：是" in reply

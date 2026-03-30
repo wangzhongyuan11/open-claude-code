@@ -5,6 +5,7 @@ from openagent.domain.messages import Message
 from openagent.domain.session import SessionTodo
 from openagent.domain.tools import ToolContext, ToolExecutionResult
 from openagent.tools.builtin.aliases import EditTool, PatchTool, ReadTool, TaskTool, TodoReadTool, TodoWriteTool, WriteTool
+from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.integration import BatchTool, CodeSearchTool, LspTool, QuestionTool, ReadSymbolTool, SkillTool
 from openagent.tools.builtin.web import WebFetchTool, WebSearchTool
 
@@ -134,6 +135,31 @@ def test_delegate_normalizes_python_alias(tmp_path: Path):
     assert result.metadata["agent"] == "general"
 
 
+def test_delegate_normalizes_simple_alias(tmp_path: Path):
+    from openagent.tools.builtin.delegate import DelegateTool
+
+    context = ToolContext(workspace=tmp_path)
+    result = DelegateTool(DummySubagentManager()).invoke(
+        {"prompt": "do it", "agent": "simple"},
+        context,
+    )
+    assert result.metadata["agent"] == "general"
+
+
+def test_task_normalizes_basic_alias(tmp_path: Path):
+    context = ToolContext(workspace=tmp_path)
+    result = TaskTool(DummySubagentManager()).invoke(
+        {
+            "description": "basic subtask",
+            "prompt": "do it",
+            "subagent_type": "basic",
+            "task_id": "task-basic",
+        },
+        context,
+    )
+    assert result.metadata["agent"] == "general"
+
+
 def test_question_tool_uses_runtime_handler(tmp_path: Path):
     context = ToolContext(
         workspace=tmp_path,
@@ -229,3 +255,13 @@ def test_webfetch_and_websearch(monkeypatch, tmp_path: Path):
     assert "Hello web." in fetch_result.content
     assert not search_result.is_error
     assert "Example A" in search_result.content
+
+
+def test_bash_tool_prepares_pytest_commands(tmp_path: Path):
+    command = "cd work/demo && PYTHONPATH=src pytest tests/test_math_ops.py -q"
+
+    prepared = BashTool._prepare_command(command, tmp_path)
+
+    assert "PYTHONDONTWRITEBYTECODE=1" in prepared
+    assert "__pycache__" in prepared
+    assert prepared.endswith(command)

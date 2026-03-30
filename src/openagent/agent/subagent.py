@@ -27,6 +27,9 @@ def normalize_subagent_name(agent_name: str | None) -> str:
     if not normalized:
         return "general"
     aliases = {
+        "simple": "general",
+        "basic": "general",
+        "standard": "general",
         "generic": "general",
         "default": "general",
         "code": "general",
@@ -89,7 +92,18 @@ class SubagentManager:
 
     def run(self, prompt: str, agent_name: str = "general", max_steps: int | None = None) -> SubagentResult:
         resolved_agent = normalize_subagent_name(agent_name)
-        profile = self.profile_lookup(resolved_agent)
+        try:
+            profile = self.profile_lookup(resolved_agent)
+        except KeyError:
+            resolved_agent = "general"
+            profile = self.profile_lookup(resolved_agent)
+            if self.event_bus:
+                self.event_bus.emit(
+                    Event(
+                        type="subagent.agent_fallback",
+                        payload={"requested_agent": agent_name, "resolved_agent": resolved_agent},
+                    )
+                )
         if self.event_bus:
             self.event_bus.emit(Event(type="subagent.started", payload={"prompt": prompt, "agent": profile.name}))
         try:

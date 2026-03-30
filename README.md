@@ -381,6 +381,8 @@ For numbered multi-step checklist requests, the runtime now performs a final-sta
 - supports delegated inline file-creation steps such as “创建文件 ...，内容为 `delegated-ok`” without accidentally rebinding the content to the previous file in the checklist
 - dedents uniformly indented multi-line file blocks captured from REPL paste input so checklist validation does not confuse prompt indentation with intended file content
 - compares JSON final files semantically instead of byte-for-byte so equivalent formatting does not trigger unnecessary continuation loops
+- treats Python workflow setup files under `src/` and `tests/` as mutable when the checklist later says to run pytest and repair a bug, so the runtime does not keep insisting on the initial broken implementation after the fix is already verified
+- can build deterministic four-point completion summaries for mixed verification batches such as `read_file + bash(pytest) + read_file + read_file`, instead of handing the final answer back to the model and risking another repair loop
 
 Todo notes:
 
@@ -388,6 +390,7 @@ Todo notes:
 - `todowrite` is treated as internal session-state maintenance for writable agents, so it does not trigger an extra approval prompt; readonly agents still deny it
 - long multi-step user messages can now populate `auto-checklist` todos to reduce forgetting within the same session and across resumed sessions
 - if the model also writes a parallel todo checklist, the runtime preserves the existing `auto-checklist` entries and merges matching status updates into them instead of replacing them
+- delegated subagent aliases are normalized defensively (`generic`, `python`, `simple`, `basic`, `default`, etc.) so long workflows do not stall just because the model picked a nearby but unsupported subagent label
 
 The runtime prompt is assembled from:
 

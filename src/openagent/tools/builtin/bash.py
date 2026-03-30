@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 from openagent.domain.tools import ToolContext, ToolExecutionResult, ToolOutputLimits
 from openagent.tools.base import BaseTool
@@ -26,9 +27,10 @@ class BashTool(BaseTool):
         self.max_output_chars = max_output_chars
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
+        command = self._prepare_command(arguments["command"], context.workspace)
         try:
             completed = subprocess.run(
-                arguments["command"],
+                command,
                 shell=True,
                 cwd=context.workspace,
                 capture_output=True,
@@ -41,7 +43,7 @@ class BashTool(BaseTool):
                 error_type="timeout",
                 retryable=True,
                 hint="Use a narrower command or increase the timeout if the task genuinely needs a longer run.",
-                metadata={"command": arguments["command"]},
+                metadata={"command": arguments["command"], "prepared_command": command},
                 status="timed_out",
             )
 
@@ -54,10 +56,17 @@ class BashTool(BaseTool):
                 error_type="nonzero_exit",
                 retryable=False,
                 hint="Inspect stderr/output and rerun with a narrower or corrected shell command.",
-                metadata={"command": arguments["command"], "exit_code": str(completed.returncode)},
+                metadata={"command": arguments["command"], "prepared_command": command, "exit_code": str(completed.returncode)},
             )
         return ToolExecutionResult.success(
             output,
             title="Executed shell command",
-            metadata={"command": arguments["command"], "exit_code": "0"},
+            metadata={"command": arguments["command"], "prepared_command": command, "exit_code": "0"},
         )
+
+    @staticmethod
+    def _prepare_command(command: str, workspace: Path) -> str:
+        if "pytest" not in command:
+            return command
+        cleanup = f"find {workspace} -type d -name __pycache__ -prune -exec rm -rf {{}} + 2>/dev/null"
+        return f"{cleanup}; export PYTHONDONTWRITEBYTECODE=1; {command}"
