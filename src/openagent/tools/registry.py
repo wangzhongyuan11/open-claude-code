@@ -10,6 +10,7 @@ from openagent.domain.tools import ToolContext, ToolExecutionResult, ToolSpec
 from openagent.extensions.base import ExtensionContext, PermissionPolicy
 from openagent.extensions.defaults import AllowAllPolicy
 from openagent.permission.models import PermissionReply, PermissionRequest
+from openagent.session.snapshot import SnapshotManager
 from openagent.tools.base import BaseTool
 from openagent.tools.truncation import apply_output_truncation
 
@@ -26,9 +27,15 @@ class ToolRegistration:
 
 
 class ToolRegistry:
-    def __init__(self, permission_policy: PermissionPolicy | None = None) -> None:
+    def __init__(
+        self,
+        permission_policy: PermissionPolicy | None = None,
+        *,
+        snapshot_manager: SnapshotManager | None = None,
+    ) -> None:
         self._registrations: dict[str, ToolRegistration] = {}
         self._permission_policy = permission_policy or AllowAllPolicy()
+        self._snapshot_manager = snapshot_manager
 
     def register(self, tool: BaseTool, *, source: str | None = None, visible: ToolVisibility | None = None) -> None:
         self.register_factory(tool.id, lambda tool=tool: tool, source=source or tool.source, visible=visible)
@@ -96,10 +103,22 @@ class ToolRegistry:
             self._emit_result(context, name, result, started)
             return result
 
+        snapshot_record = None
         try:
             tool = self.get(name)
             tool.init(context)
             tool.validate_arguments(arguments)
+            if tool.mutates_workspace() and self._snapshot_manager is not None:
+                task_id = context.metadata.get("task_id") if context.metadata else None
+                snapshot_record = self._snapshot_manager.track_operation(
+                    session_id=context.session_id or "unknown",
+                    tool_name=tool.id,
+                    agent_name=context.agent_name,
+                    message_id=context.message_id,
+                    tool_call_id=context.tool_call_id,
+                    task_id=str(task_id) if task_id is not None else None,
+                    paths=tool.snapshot_paths(arguments, context),
+                )
             self._emit(
                 context,
                 "tool.running",
@@ -142,6 +161,21 @@ class ToolRegistry:
                 metadata={"tool": name},
                 traceback=tb,
             )
+        if snapshot_record is not None and self._snapshot_manager is not None:
+            finalized = self._snapshot_manager.finalize_operation(
+                snapshot_id=snapshot_record.id,
+                result=result,
+            )
+            if finalized is not None:
+                result.metadata.update(
+                    {
+                        "snapshot_id": finalized.id,
+                        "snapshot_hash": finalized.snapshot_hash,
+                        "snapshot_status": finalized.status,
+                        "snapshot_changed_files": finalized.changed_files,
+                        "snapshot_patch_hash": finalized.patch_hash or "",
+                    }
+                )
         self._emit_result(context, name, result, started)
         return result
 

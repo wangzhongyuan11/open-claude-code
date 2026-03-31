@@ -47,6 +47,12 @@ class EditFileTool(BaseTool):
             },
         )
 
+    def mutates_workspace(self) -> bool:
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return [arguments["path"]]
+
 
 def _snapshot_ref(path: str, content: str) -> str:
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
@@ -110,6 +116,12 @@ class MultiEditTool(BaseTool):
             },
         )
 
+    def mutates_workspace(self) -> bool:
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return [arguments["path"]]
+
 
 class ReplaceAllTool(BaseTool):
     tool_id = "replace_all"
@@ -152,6 +164,12 @@ class ReplaceAllTool(BaseTool):
                 "snapshot_after_ref": _snapshot_ref(arguments["path"], updated),
             },
         )
+
+    def mutates_workspace(self) -> bool:
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return [arguments["path"]]
 
 
 class InsertTextTool(BaseTool):
@@ -207,3 +225,9 @@ class InsertTextTool(BaseTool):
                 "snapshot_after_ref": _snapshot_ref(arguments["path"], updated),
             },
         )
+
+    def mutates_workspace(self) -> bool:
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return [arguments["path"]]

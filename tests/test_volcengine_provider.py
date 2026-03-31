@@ -178,6 +178,53 @@ def test_volcengine_provider_stream_generate_parses_text_and_tool_calls(monkeypa
     assert events[4]["response"].finish == "tool-calls"
 
 
+def test_volcengine_provider_stream_generate_parses_reasoning_deltas(monkeypatch):
+    provider = VolcengineProvider(
+        model="ep-test",
+        api_key="secret",
+        base_url="https://operator.las.cn-beijing.volces.com/api/v1",
+    )
+
+    def fake_stream(path, payload):
+        assert path == "/chat/completions"
+        assert payload["stream"] is True
+        yield {
+            "model": "ep-test",
+            "choices": [
+                {
+                    "delta": {"reasoning_content": "先分析"},
+                    "finish_reason": None,
+                }
+            ],
+        }
+        yield {
+            "model": "ep-test",
+            "choices": [
+                {
+                    "delta": {"content": "结论"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 3, "reasoning_tokens": 2},
+        }
+
+    monkeypatch.setattr(provider, "_post_stream_json", fake_stream)
+
+    events = list(
+        provider.stream_generate(
+            messages=[Message(role="user", content="hello")],
+            tools=[],
+            system_prompt="system",
+        )
+    )
+
+    assert events[0]["type"] == "start"
+    assert events[1] == {"type": "reasoning-delta", "text": "先分析"}
+    assert events[2] == {"type": "text-delta", "text": "结论"}
+    assert events[3]["type"] == "finish"
+    assert events[3]["response"].tokens.reasoning == 2
+
+
 def test_volcengine_provider_post_stream_json_parses_sse(monkeypatch):
     captured = {}
 

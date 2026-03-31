@@ -43,6 +43,12 @@ class WriteTool(BaseTool):
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         return WriteFileTool().invoke(arguments, context)
 
+    def mutates_workspace(self) -> bool:
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return WriteFileTool().snapshot_paths(arguments, context)
+
 
 class EditTool(BaseTool):
     tool_id = "edit"
@@ -53,6 +59,12 @@ class EditTool(BaseTool):
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         return EditFileTool().invoke(arguments, context)
 
+    def mutates_workspace(self) -> bool:
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return EditFileTool().snapshot_paths(arguments, context)
+
 
 class PatchTool(BaseTool):
     tool_id = "patch"
@@ -62,6 +74,12 @@ class PatchTool(BaseTool):
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         return ApplyPatchTool().invoke(arguments, context)
+
+    def mutates_workspace(self) -> bool:
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return ApplyPatchTool().snapshot_paths(arguments, context)
 
 
 class TaskTool(BaseTool):
@@ -88,6 +106,7 @@ class TaskTool(BaseTool):
             result = self.subagent_manager.run(
                 arguments["prompt"],
                 agent_name=normalize_subagent_name(arguments.get("subagent_type", "general")),
+                task_id=arguments.get("task_id"),
             )
         except TypeError:
             result = self.subagent_manager.run(arguments["prompt"])

@@ -69,8 +69,17 @@ class ApplyPatchTool(BaseTool):
                 "before_content": before_content,
                 "after_content": after_content,
                 "before_exists": before_exists,
+                "snapshot_before_ref": None,
+                "snapshot_after_ref": None,
             },
         )
+
+    def mutates_workspace(self) -> bool:
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        target_path = _extract_single_target_path(arguments["patch"])
+        return [target_path] if target_path else []
 
 
 def _extract_single_target_path(patch_text: str) -> str | None:

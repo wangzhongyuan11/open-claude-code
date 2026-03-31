@@ -1,6 +1,6 @@
 from argparse import Namespace
 
-from openagent.cli.main import _classify_repl_text, _read_repl_input, build_parser
+from openagent.cli.main import _build_stream_handler, _classify_repl_text, _read_repl_input, build_parser
 
 
 def test_cli_parser_accepts_prompt_and_print_session():
@@ -69,8 +69,25 @@ def test_repl_reader_treats_yolo_toggle_as_command(monkeypatch):
     assert item == ("command", "/yolo on")
 
 
+def test_repl_reader_treats_snapshot_commands_as_commands():
+    assert _classify_repl_text("/snapshots") == ("command", "/snapshots")
+    assert _classify_repl_text("/rollback last") == ("command", "/rollback last")
+
+
 def test_classify_repl_text_treats_cancel_as_noop(capsys):
     item = _classify_repl_text("/cancel")
 
     assert item is None
     assert "[cancelled]" in capsys.readouterr().out
+
+
+def test_stream_handler_renders_reasoning_then_text(capsys):
+    handler, _state = _build_stream_handler()
+
+    handler({"type": "reasoning-start", "id": "r1"})
+    handler({"type": "reasoning-delta", "id": "r1", "text": "思考"})
+    handler({"type": "reasoning-end", "id": "r1"})
+    handler({"type": "text-start", "id": "t1"})
+    handler({"type": "text-delta", "id": "t1", "text": "回答"})
+
+    assert capsys.readouterr().out == "[thinking] 思考\n回答"

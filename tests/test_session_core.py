@@ -317,6 +317,53 @@ def test_streaming_processor_assembles_text_deltas_and_tool_calls(tmp_path: Path
     assert any(part.type == "tool" for part in assistant_message.parts)
 
 
+def test_streaming_processor_assembles_reasoning_parts_and_stream_events(tmp_path: Path):
+    class StreamingReasoningProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            raise AssertionError("stream path should be used")
+
+        def stream_generate(self, messages, tools, system_prompt=None):
+            yield {"type": "start"}
+            yield {"type": "reasoning-delta", "text": "让我先分析"}
+            yield {"type": "text-delta", "text": "结论"}
+            yield {
+                "type": "finish",
+                "response": AgentResponse(
+                    text="结论",
+                    finish="stop",
+                ),
+            }
+
+    runtime = build_runtime(tmp_path)
+    runtime.provider = StreamingReasoningProvider()
+    runtime.provider_factory = StreamingReasoningProvider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    seen: list[dict[str, str]] = []
+    reply = runtime.run_turn("stream reasoning", stream_handler=lambda event: seen.append(event))
+
+    assert reply == "结论"
+    assistant_message = next(message for message in runtime.session.messages if message.role == "assistant")
+    reasoning_parts = [part for part in assistant_message.parts if part.type == "reasoning"]
+    assert len(reasoning_parts) == 1
+    assert reasoning_parts[0].content == "让我先分析"
+    assert reasoning_parts[0].state["status"] == "completed"
+    assert [event["type"] for event in seen] == [
+        "reasoning-start",
+        "reasoning-delta",
+        "reasoning-end",
+        "text-start",
+        "text-delta",
+        "text-end",
+        "finish",
+    ]
+
+
 def test_runtime_stream_handler_receives_text_deltas(tmp_path: Path):
     class StreamingEchoProvider(BaseProvider):
         def generate(self, messages, tools, system_prompt=None):
@@ -568,3 +615,34 @@ def test_processor_stops_after_delegate_completion(tmp_path: Path):
     reply = runtime.run_turn("请把下面任务委托给子代理完成：创建 a.txt，内容是 1")
 
     assert "child done" in reply
+
+
+def test_runtime_snapshot_rollback_reverts_last_file_change_and_records_session_op(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+    context = runtime.loop.tool_context.child(message_id="m1", tool_call_id="c1", metadata={"tool_name": "write_file"})
+
+    result = runtime.registry.invoke("write_file", {"path": "snap.txt", "content": "alpha"}, context)
+
+    assert result.metadata["snapshot_id"]
+    assert (tmp_path / "snap.txt").read_text(encoding="utf-8") == "alpha"
+
+    message = runtime.rollback("last")
+
+    assert "snap.txt" in message
+    assert not (tmp_path / "snap.txt").exists()
+    assert runtime.session.messages[-1].agent == "session-op"
+    assert any(part.type == "snapshot" for part in runtime.session.messages[-1].parts)
+
+
+def test_runtime_rollback_last_skips_noop_snapshots(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+    context1 = runtime.loop.tool_context.child(message_id="m1", tool_call_id="c1", metadata={"tool_name": "write_file"})
+    runtime.registry.invoke("write_file", {"path": "snap.txt", "content": "alpha"}, context1)
+
+    context2 = runtime.loop.tool_context.child(message_id="m2", tool_call_id="c2", metadata={"tool_name": "write_file"})
+    runtime.registry.invoke("write_file", {"path": "snap.txt", "content": "alpha"}, context2)
+
+    message = runtime.rollback("last")
+
+    assert "snap.txt" in message
+    assert not (tmp_path / "snap.txt").exists()

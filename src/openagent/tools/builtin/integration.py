@@ -106,7 +106,7 @@ class SkillTool(BaseTool):
 class LspTool(BaseTool):
     tool_id = "lsp"
     name = "lsp"
-    description = "Perform basic code intelligence operations. Python files are supported with AST-based fallbacks."
+    description = "Perform code intelligence operations through a real LSP client when available, with AST fallback for Python."
     input_schema = {
         "type": "object",
         "properties": {
@@ -121,6 +121,27 @@ class LspTool(BaseTool):
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         operation = arguments["operation"]
+        manager = context.runtime_state.get("lsp_manager")
+        if manager is not None:
+            try:
+                payload = _invoke_lsp_manager(manager, arguments)
+                if operation in {"workspaceSymbol", "workspace_symbol"} and not payload:
+                    payload = _workspace_symbols(context.workspace, arguments.get("query", ""))
+                count = len(payload) if isinstance(payload, list) else 1
+                return ToolExecutionResult.success(
+                    json.dumps(payload, ensure_ascii=False, indent=2),
+                    title=f"LSP {operation}",
+                    metadata={"operation": "lsp", "transport": "stdio", "result_count": str(count)},
+                )
+            except FileNotFoundError:
+                pass
+            except Exception as exc:
+                return ToolExecutionResult.failure(
+                    f"lsp request failed: {exc}",
+                    error_type="lsp_error",
+                    hint="Check whether a matching language server is installed and the file path/position are valid.",
+                    metadata={"operation": "lsp"},
+                )
         handler = context.runtime_state.get("lsp_handler")
         if callable(handler):
             payload = handler(arguments, context)
@@ -374,6 +395,26 @@ def _workspace_symbols(workspace: Path, query: str) -> list[dict[str, Any]]:
                     }
                 )
     return results[:100]
+
+
+def _invoke_lsp_manager(manager, arguments: dict) -> list[dict[str, Any]]:
+    operation = arguments["operation"]
+    if operation in {"workspaceSymbol", "workspace_symbol"}:
+        return manager.workspace_symbol(arguments.get("query", ""))
+    file_path = arguments.get("file_path")
+    if not file_path:
+        raise FileNotFoundError("lsp requires file_path for this operation")
+    line = int(arguments.get("line", 1))
+    character = int(arguments.get("character", 1))
+    if operation in {"goToDefinition", "go_to_definition", "definition"}:
+        return manager.definition(file_path, line, character)
+    if operation in {"findReferences", "find_references", "references"}:
+        return manager.references(file_path, line, character)
+    if operation in {"documentSymbol", "document_symbol"}:
+        return manager.document_symbol(file_path)
+    if operation in {"hover"}:
+        return manager.hover(file_path, line, character)
+    raise FileNotFoundError(f"unsupported lsp operation: {operation}")
 
 
 def _python_lsp_fallback(path: Path, operation: str, line: int, character: int) -> list[dict[str, Any]]:

@@ -20,10 +20,12 @@ from openagent.domain.session import Session
 from openagent.domain.tools import ToolContext
 from openagent.events.bus import EventBus
 from openagent.events.logger import get_logger
+from openagent.lsp import LspManager
 from openagent.providers.base import BaseProvider
 from openagent.providers.factory import build_provider
 from openagent.permission.policy import SessionPermissionPolicy
 from openagent.session.manager import SessionManager
+from openagent.session.snapshot import SnapshotManager, build_snapshot_revert_message
 from openagent.session.background import BackgroundTaskManager
 from openagent.session.inspect import format_session_inspect, format_session_replay
 from openagent.session.status import status_payload
@@ -99,10 +101,18 @@ class AgentRuntime:
             workspace=self.workspace,
             event_bus=self.event_bus,
         )
+        self.lsp_manager = LspManager(self.workspace, event_bus=self.event_bus) if self.settings.lsp_enabled else None
+        self.snapshot_manager = SnapshotManager(
+            self.session_manager.store,
+            self.workspace,
+            enabled=self.settings.snapshot_enabled,
+            event_bus=self.event_bus,
+        )
         self.session.permission.setdefault("rules", [])
         self.session.permission.setdefault("yolo", self.settings.yolo_mode)
         self.session.metadata["active_agent"] = self.agent_profile.name
         self.session.metadata["yolo_mode"] = "true" if self.session.permission.get("yolo", self.settings.yolo_mode) else "false"
+        self.session.metadata["snapshot_enabled"] = "true" if self.settings.snapshot_enabled else "false"
         self.session.touch()
         self.session_manager.store.save(self.session)
         if self.hidden_agents_enabled:
@@ -215,6 +225,7 @@ class AgentRuntime:
             "title": self.session.title,
             "active_agent": self.agent_profile.name,
             "yolo_mode": self.session.metadata.get("yolo_mode", "true" if self.settings.yolo_mode else "false"),
+            "snapshot_enabled": self.session.metadata.get("snapshot_enabled", "true" if self.settings.snapshot_enabled else "false"),
             **status_payload(self.session),
             "summary_present": self.session.summary is not None,
             "compacted_message_count": self.session.summary.compacted_message_count if self.session.summary else 0,
@@ -340,6 +351,63 @@ class AgentRuntime:
         time.sleep(self.session_manager.retry_delay_ms(self.session) / 1000)
         return self.run_turn(last_user_message)
 
+    def list_snapshots(self) -> str:
+        self._refresh_session()
+        snapshots = self.snapshot_manager.list_snapshots(self.session.id)
+        payload = [
+            {
+                "id": item.id,
+                "snapshot_hash": item.snapshot_hash,
+                "tool_name": item.tool_name,
+                "tool_call_id": item.tool_call_id,
+                "task_id": item.task_id,
+                "status": item.status,
+                "changed_files": item.changed_files,
+                "created_at": item.created_at,
+                "reverted_at": item.reverted_at,
+            }
+            for item in snapshots
+        ]
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def rollback(self, scope: str, target: str | None = None, file_path: str | None = None) -> str:
+        self._refresh_session()
+        if not self.settings.snapshot_enabled:
+            return "Snapshot is disabled."
+        files = [file_path] if file_path else None
+        if scope == "last":
+            snapshots = self.snapshot_manager.list_snapshots(self.session.id)
+            if not snapshots:
+                return "No snapshot available."
+            candidate = next(
+                (
+                    item
+                    for item in snapshots
+                    if item.status != "reverted"
+                    and item.changed_files
+                    and (not file_path or file_path in item.changed_files)
+                ),
+                None,
+            )
+            if candidate is None:
+                return "No revertible snapshot available."
+            result = self.snapshot_manager.revert_snapshot(candidate.id, files=files)
+        elif scope == "snapshot" and target:
+            result = self.snapshot_manager.revert_snapshot(target, files=files)
+        elif scope == "tool" and target:
+            result = self.snapshot_manager.revert_tool_call(self.session.id, target, files=files)
+        elif scope == "task" and target:
+            result = self.snapshot_manager.revert_task(self.session.id, target, files=files)
+        elif scope == "file" and target:
+            result = self.snapshot_manager.revert_file(self.session.id, target)
+        else:
+            return "Usage: /rollback last [file] | /rollback snapshot <id> [file] | /rollback tool <tool_call_id> [file] | /rollback task <task_id> [file] | /rollback file <path>"
+        self._refresh_session()
+        self.session.messages.append(build_snapshot_revert_message(result))
+        self.session.touch()
+        self.session_manager.store.save(self.session)
+        return f"Reverted {len(result.reverted_files)} file(s): " + ", ".join(result.reverted_files)
+
     def add_todo(self, content: str, priority: str = "medium") -> str:
         self.session_manager.add_todo(self.session, content, priority)
         return f"Added todo: {content}"
@@ -393,7 +461,7 @@ class AgentRuntime:
             yolo=self.session.permission.get("yolo", self.settings.yolo_mode),
             event_bus=self.event_bus,
         )
-        registry = ToolRegistry(permission_policy=policy)
+        registry = ToolRegistry(permission_policy=policy, snapshot_manager=self.snapshot_manager)
         registry.register(ReadFileTool())
         registry.register(ReadFileRangeTool())
         registry.register(ReadTool())
@@ -438,7 +506,7 @@ class AgentRuntime:
             yolo=self.session.permission.get("yolo", self.settings.yolo_mode),
             event_bus=self.event_bus,
         )
-        filtered = ToolRegistry(permission_policy=policy)
+        filtered = ToolRegistry(permission_policy=policy, snapshot_manager=self.snapshot_manager)
         for name in profile.allowed_tools:
             try:
                 filtered.register(registry.get(name))
@@ -463,6 +531,7 @@ class AgentRuntime:
             "ask_questions": self.question_handler,
             "ask_permission": permission_handler,
             "skill_roots": self._skill_roots(),
+            "lsp_manager": self.lsp_manager,
             "agent_name": agent_name,
             "active_agent": self.agent_profile.name,
             "agent_registry": self.agent_registry,

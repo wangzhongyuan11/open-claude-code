@@ -90,7 +90,13 @@ class SubagentManager:
         self.runtime_state_factory = runtime_state_factory or (lambda _agent: {})
         self.event_bus = event_bus
 
-    def run(self, prompt: str, agent_name: str = "general", max_steps: int | None = None) -> SubagentResult:
+    def run(
+        self,
+        prompt: str,
+        agent_name: str = "general",
+        max_steps: int | None = None,
+        task_id: str | None = None,
+    ) -> SubagentResult:
         resolved_agent = normalize_subagent_name(agent_name)
         try:
             profile = self.profile_lookup(resolved_agent)
@@ -123,7 +129,7 @@ class SubagentManager:
                 agent_name=profile.name,
                 event_bus=self.event_bus,
                 runtime_state=self.runtime_state_factory(profile.name),
-                metadata={"agent": profile.name},
+                metadata={"agent": profile.name, "task_id": task_id} if task_id else {"agent": profile.name},
             ),
             event_bus=self.event_bus,
         )

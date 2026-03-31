@@ -68,6 +68,9 @@ class VolcengineProvider(BaseProvider):
             usage_payload = chunk.get("usage") or usage_payload
             for choice in chunk.get("choices", []):
                 delta = choice.get("delta", {})
+                reasoning = self._extract_reasoning_delta(delta)
+                if reasoning:
+                    yield {"type": "reasoning-delta", "text": reasoning}
                 content = delta.get("content")
                 if content:
                     text_parts.append(content)
@@ -120,6 +123,38 @@ class VolcengineProvider(BaseProvider):
                 ),
             ),
         }
+
+    @staticmethod
+    def _extract_reasoning_delta(delta: dict[str, Any]) -> str:
+        candidates = [
+            delta.get("reasoning"),
+            delta.get("reasoning_content"),
+            delta.get("thinking"),
+        ]
+        for candidate in candidates:
+            text = VolcengineProvider._coerce_reasoning_text(candidate)
+            if text:
+                return text
+        return ""
+
+    @staticmethod
+    def _coerce_reasoning_text(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, dict):
+            for key in ("text", "content", "reasoning"):
+                item = value.get(key)
+                if isinstance(item, str) and item:
+                    return item
+            return ""
+        if isinstance(value, list):
+            parts: list[str] = []
+            for item in value:
+                text = VolcengineProvider._coerce_reasoning_text(item)
+                if text:
+                    parts.append(text)
+            return "".join(parts)
+        return ""
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")

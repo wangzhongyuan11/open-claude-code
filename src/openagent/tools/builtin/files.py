@@ -122,6 +122,12 @@ class WriteFileTool(BaseTool):
             },
         )
 
+    def mutates_workspace(self) -> bool:
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return [arguments["path"]]
+
 
 class AppendFileTool(BaseTool):
     name = "append_file"
@@ -156,6 +162,12 @@ class AppendFileTool(BaseTool):
                 "snapshot_after_ref": _snapshot_ref(arguments["path"], after_content),
             },
         )
+
+    def mutates_workspace(self) -> bool:
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return [arguments["path"]]
 
 
 class ListFilesTool(BaseTool):

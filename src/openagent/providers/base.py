@@ -30,7 +30,9 @@ class BaseProvider(ABC):
         )
         yield {"type": "start"}
         if response.text:
+            yield {"type": "text-start"}
             yield {"type": "text-delta", "text": response.text}
+            yield {"type": "text-end"}
         for tool_call in response.tool_calls:
             yield {"type": "tool-call", "tool_call": tool_call}
         yield {"type": "finish", "response": response}

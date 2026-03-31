@@ -16,6 +16,7 @@ class DelegateTool(BaseTool):
         "properties": {
             "prompt": {"type": "string"},
             "agent": {"type": "string"},
+            "task_id": {"type": "string"},
         },
         "required": ["prompt"],
     }
@@ -25,7 +26,11 @@ class DelegateTool(BaseTool):
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         requested_agent = normalize_subagent_name(arguments.get("agent", "general"))
-        result = self.subagent_manager.run(arguments["prompt"], agent_name=requested_agent)
+        result = self.subagent_manager.run(
+            arguments["prompt"],
+            agent_name=requested_agent,
+            task_id=arguments.get("task_id"),
+        )
         return ToolExecutionResult.success(
             format_subagent_report(result),
             title="Delegated subtask",

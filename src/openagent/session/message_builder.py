@@ -10,6 +10,8 @@ from openagent.domain.tools import ToolArtifact, ToolExecutionResult
 @dataclass(slots=True)
 class AssistantMessageBuilder:
     message: Message = field(default_factory=lambda: Message(role="assistant", content="", parts=[]))
+    _active_text_index: int | None = None
+    _active_reasoning_index: int | None = None
 
     def start_step(self, requested_tools: int) -> None:
         self.message.add_part(
@@ -26,23 +28,51 @@ class AssistantMessageBuilder:
                 part.content["requested_tools"] = requested_tools
                 return
 
+    def start_text(self) -> None:
+        if self._active_text_index is not None:
+            return
+        self.message.add_part(Part(type="text", content="", state={"status": "streaming"}))
+        self._active_text_index = len(self.message.parts) - 1
+
     def add_text(self, text: str) -> None:
         if not text:
             return
-        if self.message.parts and self.message.parts[-1].type == "text" and isinstance(self.message.parts[-1].content, str):
-            self.message.parts[-1].content += text
-            self.message.content = self.message._derive_content_from_parts()
+        self.start_text()
+        if self._active_text_index is None:
             return
-        self.message.add_part(Part(type="text", content=text))
+        part = self.message.parts[self._active_text_index]
+        if isinstance(part.content, str):
+            part.content += text
+            self.message.content = self.message._derive_content_from_parts()
+
+    def end_text(self) -> None:
+        if self._active_text_index is None:
+            return
+        self.message.parts[self._active_text_index].state["status"] = "completed"
+        self._active_text_index = None
+
+    def start_reasoning(self) -> None:
+        if self._active_reasoning_index is not None:
+            return
+        self.message.add_part(Part(type="reasoning", content="", state={"status": "streaming"}))
+        self._active_reasoning_index = len(self.message.parts) - 1
 
     def add_reasoning(self, text: str) -> None:
         if not text:
             return
-        if self.message.parts and self.message.parts[-1].type == "reasoning" and isinstance(self.message.parts[-1].content, str):
-            self.message.parts[-1].content += text
-            self.message.content = self.message._derive_content_from_parts()
+        self.start_reasoning()
+        if self._active_reasoning_index is None:
             return
-        self.message.add_part(Part(type="reasoning", content=text))
+        part = self.message.parts[self._active_reasoning_index]
+        if isinstance(part.content, str):
+            part.content += text
+            self.message.content = self.message._derive_content_from_parts()
+
+    def end_reasoning(self) -> None:
+        if self._active_reasoning_index is None:
+            return
+        self.message.parts[self._active_reasoning_index].state["status"] = "completed"
+        self._active_reasoning_index = None
 
     def add_tool_request(self, tool_call_id: str, name: str, arguments: dict) -> None:
         self.message.add_part(
@@ -58,6 +88,8 @@ class AssistantMessageBuilder:
         )
 
     def finish_step(self, finish: str, tokens: dict, cost: float) -> None:
+        self.end_reasoning()
+        self.end_text()
         self.message.add_part(
             Part(
                 type="step-finish",

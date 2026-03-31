@@ -21,6 +21,8 @@ class Settings:
     prompt_recent_messages: int = 12
     prompt_max_tokens: int = 12000
     yolo_mode: bool = False
+    snapshot_enabled: bool = True
+    lsp_enabled: bool = True
 
     @classmethod
     def from_workspace(cls, workspace: str | Path) -> "Settings":
@@ -41,6 +43,8 @@ class Settings:
         prompt_recent_messages = int(os.getenv("OPENAGENT_PROMPT_RECENT_MESSAGES", "12"))
         prompt_max_tokens = int(os.getenv("OPENAGENT_PROMPT_MAX_TOKENS", "12000"))
         yolo_mode = os.getenv("OPENAGENT_YOLO", "false").lower() in {"1", "true", "yes", "on"}
+        snapshot_enabled = os.getenv("OPENAGENT_SNAPSHOT", "true").lower() in {"1", "true", "yes", "on"}
+        lsp_enabled = os.getenv("OPENAGENT_LSP", "true").lower() in {"1", "true", "yes", "on"}
         return cls(
             workspace=workspace_path,
             session_root=state_root / "sessions",
@@ -56,4 +60,6 @@ class Settings:
             prompt_recent_messages=prompt_recent_messages,
             prompt_max_tokens=prompt_max_tokens,
             yolo_mode=yolo_mode,
+            snapshot_enabled=snapshot_enabled,
+            lsp_enabled=lsp_enabled,
         )

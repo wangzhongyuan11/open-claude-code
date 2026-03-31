@@ -166,11 +166,17 @@ Interactive commands:
 - `/summary`
 - `/inspect`
 - `/replay`
+- `/snapshots`
 - `/yolo`
 - `/yolo on`
 - `/yolo off`
 - `/compact`
 - `/revert`
+- `/rollback last [file]`
+- `/rollback snapshot <id> [file]`
+- `/rollback tool <tool_call_id> [file]`
+- `/rollback task <task_id> [file]`
+- `/rollback file <path>`
 - `/retry`
 - `/todos`
 - `/todo add <text>`
@@ -213,6 +219,8 @@ Interactive command reference:
   - prints a structured JSON view of recent messages, parts, and metadata
 - `/replay`
   - prints a human-readable turn-by-turn replay
+- `/snapshots`
+  - lists persisted git-backed snapshots for the current session, including snapshot tree hashes, tool call ids, and changed files
 - `/yolo`
   - prints the current runtime status JSON, including whether YOLO mode is enabled
 - `/yolo on`
@@ -224,6 +232,17 @@ Interactive command reference:
 - `/revert`
   - removes the last user turn together with its assistant/tool results
   - appends a `session-op` revert record so the change is auditable
+- `/rollback last [file]`
+  - reverts the most recent tracked file snapshot
+  - if a file path is provided, only that file is restored from the latest snapshot
+- `/rollback snapshot <id> [file]`
+  - reverts a specific snapshot id, optionally scoped to one file
+- `/rollback tool <tool_call_id> [file]`
+  - reverts the tracked file changes produced by one tool call
+- `/rollback task <task_id> [file]`
+  - reverts all tracked file changes associated with a task id in reverse order
+- `/rollback file <path>`
+  - reverts the most recent snapshot that touched the given file
 - `/retry`
   - reruns the last user turn after recording retry metadata
 - `/todos`
@@ -334,7 +353,7 @@ After long checklist runs, use `/todos`, `/status`, `/inspect`, and `/replay` to
 - Routing is heuristic rather than model-native planning; it works for common plan/build/explore prompts but is not yet a full workflow engine.
 - Checklist extraction is optimized for numbered file/dir/edit tasks; highly implicit natural-language workflows may still need another continuation round.
 - Hidden agents (`title`, `summary`, `compaction`, `generate`) are functional but simpler than OpenCode’s richer internal service stack.
-- `lsp` is still a lightweight local fallback, not a full persistent language-server client.
+- `lsp` now uses a real stdio language-server client when a matching server is installed, with Python AST fallback preserved as a compatibility path.
 - Tool permissions are session-scoped and consistent across delegated agents, but the UX is still CLI-centric rather than a richer approval UI.
 
 ## Session Runtime
@@ -355,10 +374,10 @@ The session layer is now the runtime center rather than a plain message store.
 The processor now runs through a basic streaming pipeline:
 
 - `provider.stream_generate(...)`
-- `session/llm.py` emits stream events
-- `session/processor.py` incrementally appends message parts
+- `session/llm.py` normalizes `reasoning-start/reasoning-delta/reasoning-end/text-start/text-delta/text-end`
+- `session/processor.py` incrementally appends `reasoning` and `text` parts in stream order
 - final assistant/tool messages are persisted after stream completion
-- `openagent --stream` renders assistant text deltas live in the terminal
+- `openagent --stream` renders assistant thinking blocks live in the terminal, then naturally switches into normal answer text
 
 The processor also contains session-level completion heuristics for common tool-driven tasks:
 
@@ -520,6 +539,10 @@ The tool layer is now a proper execution subsystem instead of a loose handler ma
 - `tools/truncation.py`
   - provides a central truncation layer for oversized tool output
   - writes full output to `.openagent/tool_outputs/` and returns a preview plus metadata when needed
+- `session/snapshot.py`
+  - tracks file state before mutating tool calls
+  - computes changed files and diffs after the write completes
+  - restores files by snapshot id, tool call id, task id, or file path
 - `domain/tools.py`
   - defines `ToolSpec`, `ToolContext`, `ToolExecutionResult`, `ToolError`, `ToolArtifact`, and output limits
 
@@ -534,6 +557,35 @@ Current tool execution model:
   - current tool call id
   - agent name
   - event bus
+- mutating tools are snapshotted before execution when `OPENAGENT_SNAPSHOT` is enabled
+- snapshot ids, changed files, and patch hashes are attached to mutating tool results
+
+## Snapshot Rollback
+
+Snapshot rollback is session-scoped and file-selective. It does not reset the whole workspace.
+
+- snapshots are created before real mutating tool calls such as `write_file`, `append_file`, `edit_file`, `multiedit`, `replace_all`, `insert_text`, and `apply_patch`
+- the snapshot backend uses an internal git repository under `.openagent/snapshot/` rather than relying on the user's main git history
+- each snapshot stores:
+  - a snapshot id
+  - a git tree hash
+  - session id
+  - agent name
+  - message id
+  - tool call id
+  - optional task id
+- after the tool finishes, the runtime computes:
+  - changed files
+  - a patch hash
+  - a diff against the stored git tree
+- rollback supports:
+  - latest snapshot
+  - one snapshot id
+  - one tool call id
+  - one task id
+  - one specific file
+- new files are deleted on rollback, modified files are restored from the snapshot tree, and deleted files are recreated from the snapshot tree
+- snapshot tracking can be disabled with `OPENAGENT_SNAPSHOT=false`
 - every tool result is normalized into a shared result structure:
   - `title`
   - `content` / output
@@ -623,7 +675,9 @@ Additional opencode-style integrations now available:
 - `skill`
   - loads a `SKILL.md` from configured skill roots and injects it as structured context
 - `lsp`
-  - provides AST-based Python fallback navigation plus a hook for an external LSP handler
+  - uses a real stdio LSP client for `workspaceSymbol`, `definition`, `references`, `documentSymbol`, and `hover` when a matching server is available
+  - currently ships built-in server mappings for Python (`pyright-langserver`) and TypeScript/JavaScript (`typescript-language-server`)
+  - falls back to local Python AST navigation if no matching LSP server is available
 - `read_symbol`
   - reads a named Python function or class definition from a file without loading the whole file
 - `batch`

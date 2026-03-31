@@ -1,9 +1,12 @@
 import json
 from pathlib import Path
+import sys
+import textwrap
 
 from openagent.domain.messages import Message
 from openagent.domain.session import SessionTodo
 from openagent.domain.tools import ToolContext, ToolExecutionResult
+from openagent.lsp import LspManager, LspServerInfo
 from openagent.tools.builtin.aliases import EditTool, PatchTool, ReadTool, TaskTool, TodoReadTool, TodoWriteTool, WriteTool
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.integration import BatchTool, CodeSearchTool, LspTool, QuestionTool, ReadSymbolTool, SkillTool
@@ -11,13 +14,14 @@ from openagent.tools.builtin.web import WebFetchTool, WebSearchTool
 
 
 class DummySubagentManager:
-    def run(self, prompt: str, agent_name: str = "general"):
+    def run(self, prompt: str, agent_name: str = "general", task_id: str | None = None):
         result = type("Result", (), {})()
         result.summary = "subagent completed"
         result.touched_paths = ["work/sub.txt"]
         result.verified_paths = ["work/sub.txt"]
         result.history = [Message(role="assistant", content="ok")]
         result.agent_name = agent_name
+        result.task_id = task_id
         return result
 
 
@@ -78,6 +82,28 @@ def test_task_tool_returns_structured_task_result(tmp_path: Path):
     assert not result.is_error
     assert "task_id: task-1" in result.content
     assert "<task_result>" in result.content
+
+
+def test_task_tool_passes_task_id_to_subagent_manager(tmp_path: Path):
+    calls: dict[str, str | None] = {}
+
+    class RecordingManager(DummySubagentManager):
+        def run(self, prompt: str, agent_name: str = "general", task_id: str | None = None):
+            calls["task_id"] = task_id
+            return super().run(prompt, agent_name=agent_name, task_id=task_id)
+
+    context = ToolContext(workspace=tmp_path)
+    TaskTool(RecordingManager()).invoke(
+        {
+            "description": "Create delegated file",
+            "prompt": "create it",
+            "subagent_type": "general-purpose",
+            "task_id": "task-1",
+        },
+        context,
+    )
+
+    assert calls["task_id"] == "task-1"
 
 
 def test_delegate_and_task_normalize_agent_aliases(tmp_path: Path):
@@ -203,6 +229,112 @@ def test_lsp_python_fallback_and_codesearch(tmp_path: Path):
     assert not lsp_result.is_error
     assert "add" in lsp_result.content
     assert "mod.py:2:     return a + b" in code_result.content
+
+
+def test_lsp_tool_uses_real_stdio_manager_when_available(tmp_path: Path):
+    server_script = tmp_path / "fake_lsp.py"
+    server_script.write_text(
+        textwrap.dedent(
+            """
+            import json
+            import sys
+
+            docs = {}
+
+            def send(payload):
+                body = json.dumps(payload).encode("utf-8")
+                sys.stdout.buffer.write(f"Content-Length: {len(body)}\\r\\n\\r\\n".encode("ascii") + body)
+                sys.stdout.buffer.flush()
+
+            def read_message():
+                headers = {}
+                while True:
+                    line = sys.stdin.buffer.readline()
+                    if not line:
+                        return None
+                    if line == b"\\r\\n":
+                        break
+                    text = line.decode("ascii").strip()
+                    if ":" in text:
+                        k, v = text.split(":", 1)
+                        headers[k.lower()] = v.strip()
+                length = int(headers.get("content-length", "0"))
+                body = sys.stdin.buffer.read(length)
+                return json.loads(body.decode("utf-8")) if body else None
+
+            while True:
+                msg = read_message()
+                if msg is None:
+                    break
+                method = msg.get("method")
+                if method == "initialize":
+                    send({"jsonrpc": "2.0", "id": msg["id"], "result": {"capabilities": {}}})
+                elif method == "initialized":
+                    pass
+                elif method == "shutdown":
+                    send({"jsonrpc": "2.0", "id": msg["id"], "result": None})
+                elif method == "exit":
+                    break
+                elif method == "textDocument/didOpen":
+                    item = msg["params"]["textDocument"]
+                    docs[item["uri"]] = item["text"]
+                elif method == "textDocument/definition":
+                    uri = msg["params"]["textDocument"]["uri"]
+                    send({"jsonrpc": "2.0", "id": msg["id"], "result": [{"uri": uri, "range": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 7}}}]})
+                elif method == "textDocument/references":
+                    uri = msg["params"]["textDocument"]["uri"]
+                    send({"jsonrpc": "2.0", "id": msg["id"], "result": [{"uri": uri, "range": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 7}}}, {"uri": uri, "range": {"start": {"line": 2, "character": 4}, "end": {"line": 2, "character": 7}}}]})
+                elif method == "textDocument/documentSymbol":
+                    send({"jsonrpc": "2.0", "id": msg["id"], "result": [{"name": "add", "kind": 12, "range": {"start": {"line": 0, "character": 0}, "end": {"line": 1, "character": 16}}, "selectionRange": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 7}}}]})
+                elif method == "textDocument/hover":
+                    send({"jsonrpc": "2.0", "id": msg["id"], "result": {"contents": {"kind": "markdown", "value": "def add(a, b)"}}})
+                elif method == "workspace/symbol":
+                    uri = list(docs.keys())[0]
+                    send({"jsonrpc": "2.0", "id": msg["id"], "result": [{"name": "add", "kind": 12, "location": {"uri": uri, "range": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 7}}}}]})
+            """
+        ),
+        encoding="utf-8",
+    )
+    file_path = tmp_path / "mod.py"
+    file_path.write_text("def add(a, b):\n    return a + b\n\nx = add(1, 2)\n", encoding="utf-8")
+    manager = LspManager(
+        tmp_path,
+        servers=[
+            LspServerInfo(
+                id="fake-python",
+                command=[sys.executable, str(server_script)],
+                extensions=(".py",),
+                language_ids={".py": "python"},
+            )
+        ],
+    )
+    context = ToolContext(workspace=tmp_path, runtime_state={"lsp_manager": manager})
+
+    try:
+        definition = LspTool().invoke(
+            {"operation": "goToDefinition", "file_path": "mod.py", "line": 4, "character": 5},
+            context,
+        )
+        references = LspTool().invoke(
+            {"operation": "findReferences", "file_path": "mod.py", "line": 4, "character": 5},
+            context,
+        )
+        hover = LspTool().invoke(
+            {"operation": "hover", "file_path": "mod.py", "line": 4, "character": 5},
+            context,
+        )
+        symbols = LspTool().invoke({"operation": "workspaceSymbol", "query": "add"}, context)
+    finally:
+        manager.close()
+
+    assert not definition.is_error
+    assert '"path": "mod.py"' in definition.content
+    assert not references.is_error
+    assert references.content.count('"path": "mod.py"') == 2
+    assert not hover.is_error
+    assert "def add(a, b)" in hover.content
+    assert not symbols.is_error
+    assert '"name": "add"' in symbols.content
 
 
 def test_read_symbol_tool(tmp_path: Path):

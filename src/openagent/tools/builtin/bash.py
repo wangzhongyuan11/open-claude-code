@@ -26,6 +26,13 @@ class BashTool(BaseTool):
         self.timeout_seconds = timeout_seconds
         self.max_output_chars = max_output_chars
 
+    def mutates_workspace(self) -> bool:
+        # Shell commands are opaque to the runtime, so snapshot them conservatively.
+        return True
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return []
+
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         command = self._prepare_command(arguments["command"], context.workspace)
         try:

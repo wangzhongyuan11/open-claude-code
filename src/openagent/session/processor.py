@@ -401,13 +401,42 @@ class SessionProcessor:
             )
         ):
             event_type = event["type"]
+            if event_type == "reasoning-start":
+                builder.start_reasoning()
+                self._emit("processor.part.appended", {"role": "assistant", "part_type": "reasoning", "phase": "start"})
+                if stream_handler is not None:
+                    stream_handler({"type": "reasoning-start", "id": event.get("id")})
+                continue
+            if event_type == "reasoning-delta":
+                delta = event["text"]
+                builder.add_reasoning(delta)
+                self._emit("processor.part.appended", {"role": "assistant", "part_type": "reasoning"})
+                if stream_handler is not None:
+                    stream_handler({"type": "reasoning-delta", "id": event.get("id"), "text": delta})
+                continue
+            if event_type == "reasoning-end":
+                builder.end_reasoning()
+                self._emit("processor.part.appended", {"role": "assistant", "part_type": "reasoning", "phase": "end"})
+                if stream_handler is not None:
+                    stream_handler({"type": "reasoning-end", "id": event.get("id")})
+                continue
+            if event_type == "text-start":
+                builder.start_text()
+                if stream_handler is not None:
+                    stream_handler({"type": "text-start", "id": event.get("id")})
+                continue
             if event_type == "text-delta":
                 delta = event["text"]
                 text_buffer += delta
                 builder.add_text(delta)
                 self._emit("processor.part.appended", {"role": "assistant", "part_type": "text"})
                 if stream_handler is not None:
-                    stream_handler({"type": "text-delta", "text": delta})
+                    stream_handler({"type": "text-delta", "id": event.get("id"), "text": delta})
+                continue
+            if event_type == "text-end":
+                builder.end_text()
+                if stream_handler is not None:
+                    stream_handler({"type": "text-end", "id": event.get("id")})
                 continue
             if event_type == "tool-call":
                 tool_call = event["tool_call"]

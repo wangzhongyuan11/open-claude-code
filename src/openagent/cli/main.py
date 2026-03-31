@@ -32,6 +32,7 @@ SHELL_COMMANDS = {
     "/summary",
     "/inspect",
     "/replay",
+    "/snapshots",
     "/yolo",
     "/compact",
     "/revert",
@@ -48,11 +49,13 @@ HELP_TEXT = """Available interactive commands:
 /summary                  Print a PR-style conversation summary
 /inspect                  Print a structured JSON inspect view
 /replay                   Print a turn-by-turn replay view
+/snapshots                List persisted file snapshots for the current session
 /yolo                     Print YOLO mode status
 /yolo on                  Enable YOLO mode (auto-approve ask permissions, deny still applies)
 /yolo off                 Disable YOLO mode
 /compact                  Force a compaction pass if needed
 /revert                   Remove the last user turn and its assistant/tool results
+/rollback ...             Revert files from tracked snapshots (last/snapshot/tool/task/file)
 /retry                    Re-run the last user turn
 /todos                    List current persisted todos
 /todo add <text>          Add a todo item (priority defaults to medium)
@@ -90,9 +93,29 @@ def _print_session_summary(runtime) -> None:
 
 
 def _build_stream_handler():
-    state = {"printed": False}
+    state = {"printed": False, "in_reasoning": False, "printed_reasoning": False}
 
     def handle(event: dict[str, Any]) -> None:
+        if event["type"] == "reasoning-start":
+            if state["printed"]:
+                print()
+            print("[thinking] ", end="", flush=True)
+            state["printed"] = True
+            state["in_reasoning"] = True
+            state["printed_reasoning"] = False
+            return
+        if event["type"] == "reasoning-delta":
+            print(event["text"], end="", flush=True)
+            state["printed"] = True
+            state["printed_reasoning"] = True
+            return
+        if event["type"] == "reasoning-end":
+            if state["in_reasoning"] and state["printed_reasoning"]:
+                print()
+            state["in_reasoning"] = False
+            return
+        if event["type"] == "text-start":
+            return
         if event["type"] == "text-delta":
             print(event["text"], end="", flush=True)
             state["printed"] = True
@@ -171,6 +194,7 @@ def _classify_repl_text(text: str) -> tuple[str, str] | None:
         or stripped.startswith("/todo ")
         or stripped.startswith("/agent ")
         or stripped.startswith("/yolo ")
+        or stripped.startswith("/rollback ")
     ):
         return ("command", stripped)
     return ("message", text)
@@ -345,7 +369,7 @@ def _read_repl_input(session: PromptSession | None = None) -> tuple[str, str] | 
                 continue
             if stripped in {"/exit", "exit", "quit"}:
                 return ("command", "/exit")
-            if stripped in SHELL_COMMANDS or stripped.startswith("/todo ") or stripped.startswith("/agent ") or stripped.startswith("/yolo "):
+            if stripped in SHELL_COMMANDS or stripped.startswith("/todo ") or stripped.startswith("/agent ") or stripped.startswith("/yolo ") or stripped.startswith("/rollback "):
                 return ("command", stripped)
         if stripped == "/cancel":
             print("[cancelled]")
@@ -459,6 +483,9 @@ def main() -> None:
         if item_type == "command" and user_input == "/replay":
             print(runtime.replay_session())
             continue
+        if item_type == "command" and user_input == "/snapshots":
+            print(runtime.list_snapshots())
+            continue
         if item_type == "command" and user_input == "/yolo":
             print(runtime.status_report())
             continue
@@ -470,6 +497,23 @@ def main() -> None:
             continue
         if item_type == "command" and user_input == "/revert":
             print(runtime.revert_last_turn())
+            continue
+        if item_type == "command" and user_input.startswith("/rollback "):
+            parts = shlex.split(user_input)
+            if len(parts) == 2 and parts[1] == "last":
+                print(runtime.rollback("last"))
+                continue
+            if len(parts) == 3 and parts[1] == "file":
+                print(runtime.rollback("file", parts[2]))
+                continue
+            if len(parts) in {3, 4} and parts[1] in {"snapshot", "tool", "task"}:
+                file_path = parts[3] if len(parts) == 4 else None
+                print(runtime.rollback(parts[1], parts[2], file_path))
+                continue
+            if len(parts) == 3 and parts[1] == "last":
+                print(runtime.rollback("last", file_path=parts[2]))
+                continue
+            print("Usage: /rollback last [file] | /rollback snapshot <id> [file] | /rollback tool <tool_call_id> [file] | /rollback task <task_id> [file] | /rollback file <path>")
             continue
         if item_type == "command" and user_input == "/retry":
             print(runtime.retry_last_turn())

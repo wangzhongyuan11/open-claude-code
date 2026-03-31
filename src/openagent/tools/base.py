@@ -58,6 +58,12 @@ class BaseTool(ABC):
     def get_output_limits(self) -> ToolOutputLimits:
         return self.output_limits
 
+    def mutates_workspace(self) -> bool:
+        return False
+
+    def snapshot_paths(self, arguments: dict, context: ToolContext) -> list[str]:
+        return []
+
     @abstractmethod
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
         raise NotImplementedError
