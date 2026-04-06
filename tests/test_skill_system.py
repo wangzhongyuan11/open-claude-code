@@ -1,10 +1,16 @@
 from pathlib import Path
 
 from openagent.agent.profile import AgentProfile
+from openagent.agent.runtime import AgentRuntime
 from openagent.permission.models import PermissionRule
 from openagent.permission.policy import SessionPermissionPolicy
+from openagent.config.settings import Settings
+from openagent.domain.messages import AgentResponse
+from openagent.providers.base import BaseProvider
+from openagent.session.manager import SessionManager
 from openagent.session.store import SessionStore
 from openagent.skill import SkillManager
+from openagent.skill.selection import SkillSelector
 
 
 def _write_skill(root: Path, name: str, *, description: str = "Use for testing.", body: str = "# Test\nDo it.") -> Path:
@@ -83,3 +89,48 @@ def test_skill_permission_can_deny_specific_skill(tmp_path: Path):
 
     assert policy.allows_skill(session.id, "openai-docs") is True
     assert policy.allows_skill(session.id, "blocked-skill") is False
+
+
+def test_skill_selector_matches_task_semantics_and_agent_role(tmp_path: Path):
+    workspace = tmp_path / "repo"
+    home = tmp_path / "home"
+    workspace.mkdir()
+    manager = SkillManager(workspace, home=home)
+    _write_skill(workspace / ".opencode" / "skill", "skill-creator", description="Use when creating or updating a skill.")
+    _write_skill(workspace / ".opencode" / "skill", "openai-docs", description="Use when answering OpenAI API documentation questions.")
+
+    result = manager.refresh()
+    matches = SkillSelector().select(
+        user_text="请创建一个新的 skill，并说明 SKILL.md 规范。",
+        profile=AgentProfile(name="plan", description="Planning agent"),
+        skills=result.skills,
+    )
+
+    assert matches
+    assert matches[0].skill.name == "skill-creator"
+
+
+def test_runtime_auto_injects_selected_skill_into_turn_prompt(tmp_path: Path):
+    class PromptCaptureProvider(BaseProvider):
+        def __init__(self):
+            self.system_prompts: list[str] = []
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.system_prompts.append(system_prompt or "")
+            return AgentResponse(text="used skill")
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    _write_skill(workspace / ".opencode" / "skill", "skill-creator", description="Use when creating or updating a skill.")
+    settings = Settings.from_workspace(workspace)
+    store = SessionStore(settings.session_root)
+    manager = SessionManager(store)
+    session = manager.start(workspace=workspace)
+    provider = PromptCaptureProvider()
+    runtime = AgentRuntime(provider=provider, workspace=workspace, session_manager=manager, session=session, settings=settings)
+
+    reply = runtime.run_turn("请只分析如何创建一个新的 skill，并说明 SKILL.md 规范，不要修改代码。")
+
+    assert reply == "used skill"
+    assert "selected_skill name=\"skill-creator\"" in provider.system_prompts[-1]
+    assert any(part.type == "skill" for message in runtime.session.messages for part in message.parts)

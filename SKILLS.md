@@ -100,9 +100,22 @@ OpenAgent does not inject every skill body at startup. The runtime:
 
 1. Discovers and validates `SKILL.md` files.
 2. Adds only available skill names and descriptions to the agent prompt.
-3. Loads full skill content only when the model calls the unified `skill` tool with a specific skill name.
+3. Scores available skills against the active agent profile and current user task.
+4. Loads high-confidence selected skill content into the current turn's system prompt.
+5. Allows the model to explicitly load any remaining visible skill through the unified `skill` tool.
 
 This keeps context usage bounded and explains why a skill is visible: it was discovered, valid, and not denied by permission rules.
+
+Selection uses metadata only before loading:
+
+- `name`
+- `description`
+- `metadata`
+- `compatibility`
+- active agent name / description / prompt
+- current user text
+
+The selector records reasons such as `skill-name-mentioned`, `description-overlap`, `phrase-match`, or domain-specific hints like `openai-task`.
 
 ## Permissions
 
@@ -144,6 +157,7 @@ OpenAgent scans OpenCode `.opencode/{skill,skills}` directories and compatible `
 ```bash
 openagent --skills
 openagent --skill openai-docs
+openagent --skill-recommend "How do I use the OpenAI Responses API?"
 OPENAGENT_SKILL_PATHS=/tmp/my-skills openagent --skills
 ```
 
@@ -152,4 +166,5 @@ Interactive:
 ```text
 /skills
 /skill openai-docs
+/skill recommend How do I use the OpenAI Responses API?
 ```

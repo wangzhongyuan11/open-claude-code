@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from openagent.agent.loop import AgentLoop
-from openagent.agent.runtime import AgentRuntime
+from openagent.agent.runtime import AgentRuntime, build_default_runtime
 from openagent.config.settings import Settings
 from openagent.domain.messages import AgentResponse, Message
 from openagent.domain.session import SessionStatus
@@ -95,6 +95,18 @@ def test_interrupted_session_recovers_as_degraded(tmp_path: Path):
 
     assert recovered.status.state == "degraded"
     assert recovered.status.recovery_hint is not None
+
+
+def test_build_default_runtime_yolo_flag_overrides_existing_session(tmp_path: Path):
+    initial = build_default_runtime(workspace=tmp_path)
+    session_id = initial.session.id
+    initial.session.permission["yolo"] = False
+    initial.session_manager.store.save(initial.session)
+
+    resumed = build_default_runtime(workspace=tmp_path, session_id=session_id, yolo=True)
+
+    assert resumed.session.permission["yolo"] is True
+    assert resumed.session.metadata["yolo_mode"] == "true"
 
 
 def test_todo_commands_are_persisted(tmp_path: Path):

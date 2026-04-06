@@ -20,6 +20,8 @@ def test_cli_parser_accepts_prompt_and_print_session():
             "--skills",
             "--skill",
             "openai-docs",
+            "--skill-recommend",
+            "create a skill",
         ]
     )
 
@@ -31,6 +33,7 @@ def test_cli_parser_accepts_prompt_and_print_session():
     assert args.agent == "plan"
     assert args.skills is True
     assert args.skill == "openai-docs"
+    assert args.skill_recommend == "create a skill"
 
 
 def test_cli_parser_accepts_agent_create_and_show():
@@ -92,6 +95,7 @@ def test_repl_reader_treats_snapshot_commands_as_commands():
 def test_repl_reader_treats_skill_commands_as_commands():
     assert _classify_repl_text("/skills") == ("command", "/skills")
     assert _classify_repl_text("/skill openai-docs") == ("command", "/skill openai-docs")
+    assert _classify_repl_text("/skill recommend create a skill") == ("command", "/skill recommend create a skill")
 
 
 def test_classify_repl_text_treats_cancel_as_noop(capsys):

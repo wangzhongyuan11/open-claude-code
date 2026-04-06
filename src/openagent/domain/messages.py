@@ -22,6 +22,7 @@ PartType = Literal[
     "retry",
     "background-task",
     "permission",
+    "skill",
 ]
 FinishReason = Literal["tool-calls", "stop", "length", "content-filter", "other"]
 
