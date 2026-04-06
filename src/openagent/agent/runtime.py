@@ -37,7 +37,7 @@ from openagent.session.task_validation import (
     parse_multistep_requirements,
     validate_multistep_requirements,
 )
-from openagent.skill import SkillManager, SkillMatch, SkillSelector
+from openagent.skill import SkillManager
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.background import BackgroundTaskTool
 from openagent.tools.builtin.delegate import DelegateTool
@@ -104,7 +104,6 @@ class AgentRuntime:
         )
         self.lsp_manager = LspManager(self.workspace, event_bus=self.event_bus) if self.settings.lsp_enabled else None
         self.skill_manager = SkillManager(self.workspace, extra_paths=self.settings.skill_paths)
-        self.skill_selector = SkillSelector()
         self.snapshot_manager = SnapshotManager(
             self.session_manager.store,
             self.workspace,
@@ -161,12 +160,9 @@ class AgentRuntime:
         )
         if checklist_requirements is not None and len(checklist_requirements.steps) >= 3:
             self.session_manager.sync_checklist(self.session, checklist_requirements)
-        selected_skills = self._select_skills_for_turn(user_text, self.agent_profile)
-        if selected_skills:
-            self._record_skill_selection(selected_skills)
         prompt_context = self.session_manager.build_prompt(
             self.session,
-            self._system_prompt_for_turn(self.agent_profile, user_text, selected_skills),
+            self._system_prompt_for(self.agent_profile),
         )
         try:
             result = self.loop.run_result(
@@ -366,16 +362,6 @@ class AgentRuntime:
             "denied": [skill.name for skill in result.skills if skill not in allowed],
             "errors": [error.to_dict() for error in result.errors],
             "roots": result.roots,
-        }
-        return json.dumps(payload, ensure_ascii=False, indent=2)
-
-    def recommend_skills(self, user_text: str, agent_name: str | None = None) -> str:
-        profile = self.agent_registry.get(agent_name or self.agent_profile.name)
-        matches = self._select_skills_for_turn(user_text, profile)
-        payload = {
-            "agent": profile.name,
-            "query": user_text,
-            "matches": [match.to_dict() for match in matches],
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -666,18 +652,6 @@ class AgentRuntime:
             prompt = prompt + "\n\n" + skills
         return build_system_prompt(self.session, prompt)
 
-    def _system_prompt_for_turn(
-        self,
-        profile: AgentProfile,
-        user_text: str,
-        selected_skills: list[SkillMatch] | None = None,
-    ) -> str:
-        prompt = compose_agent_prompt(profile)
-        skills = self._skill_prompt_for(profile, user_text=user_text, selected_skills=selected_skills)
-        if skills:
-            prompt = prompt + "\n\n" + skills
-        return build_system_prompt(self.session, prompt)
-
     def _system_prompt_for_agent_name(self, agent_name: str) -> str:
         profile = self.agent_registry.get(agent_name)
         return self._system_prompt_for(profile)
@@ -866,13 +840,7 @@ class AgentRuntime:
                 seen.append(root)
         return seen
 
-    def _skill_prompt_for(
-        self,
-        profile: AgentProfile,
-        *,
-        user_text: str | None = None,
-        selected_skills: list[SkillMatch] | None = None,
-    ) -> str:
+    def _skill_prompt_for(self, profile: AgentProfile) -> str:
         try:
             policy = SessionPermissionPolicy(
                 self.session_manager.store,
@@ -884,70 +852,19 @@ class AgentRuntime:
             available = [skill for skill in result.skills if policy.allows_skill(self.session.id, skill.name)]
             if not available:
                 return ""
-            selected = selected_skills if selected_skills is not None else (
-                self.skill_selector.select(user_text=user_text or "", profile=profile, skills=available) if user_text else []
-            )
-            selected_lines: list[str] = []
-            loaded_blocks: list[str] = []
-            for match in selected:
-                selected_lines.append(
-                    f"- {match.skill.name} (score={match.score:.1f}; reasons={', '.join(match.reasons) or 'matched'})"
-                )
-                loaded = self.skill_manager.get(match.skill.name)
-                if loaded is not None:
-                    loaded_blocks.extend(
-                        [
-                            f'<selected_skill name="{match.skill.name}" score="{match.score:.1f}">',
-                            loaded.content,
-                            f"Base directory: {loaded.info.base_dir}",
-                            "</selected_skill>",
-                        ]
-                    )
             return "\n".join(
                 [
                     "Skills provide specialized instructions and workflows for specific tasks.",
-                    "Use the `skill` tool to load a skill only when the user task matches its description.",
-                    "The runtime may preselect high-confidence skills for the current turn; follow their instructions when relevant, but do not force them onto unrelated tasks.",
+                    "Decide yourself whether the current task should use a skill. If a listed skill matches the task, call the unified `skill` tool with that skill name before following its workflow.",
+                    "Do not load a skill just because it is listed. If no skill clearly matches, continue without using one.",
+                    "Only the name and description are shown here; the full skill body is loaded lazily by the `skill` tool.",
+                    "Do not use read_file, grep, or other filesystem tools to load a SKILL.md as a substitute for the `skill` tool. Direct file reads are for inspecting project files, not activating a skill.",
+                    "If the user explicitly asks you to decide whether a skill is relevant, make that decision from the descriptions below and call `skill` when one directly applies.",
                     self.skill_manager.format_available(verbose=True, skills=available),
-                    *(["Recommended skills for this turn:", *selected_lines] if selected_lines else []),
-                    *(["Loaded selected skill instructions:", *loaded_blocks] if loaded_blocks else []),
                 ]
             )
         except Exception:
             return ""
-
-    def _select_skills_for_turn(self, user_text: str, profile: AgentProfile) -> list[SkillMatch]:
-        try:
-            policy = SessionPermissionPolicy(
-                self.session_manager.store,
-                profile,
-                yolo=self.session.permission.get("yolo", self.settings.yolo_mode),
-                event_bus=self.event_bus,
-            )
-            result = self.skill_manager.discover()
-            available = [skill for skill in result.skills if policy.allows_skill(self.session.id, skill.name)]
-            return self.skill_selector.select(user_text=user_text, profile=profile, skills=available)
-        except Exception:
-            return []
-
-    def _record_skill_selection(self, matches: list[SkillMatch]) -> None:
-        content = "[Skill Selection] " + ", ".join(match.skill.name for match in matches)
-        self.session_manager.append_message(
-            self.session,
-            Message(
-                role="assistant",
-                agent="session-op",
-                content=content,
-                finish="stop",
-                parts=[
-                    Part(
-                        type="skill",
-                        content={"matches": [match.to_dict() for match in matches]},
-                        state={"status": "selected"},
-                    )
-                ],
-            ),
-        )
 
     def _skill_allowed_for_agent(self, agent_name: str):
         profile = self.agent_registry.get(agent_name)

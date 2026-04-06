@@ -175,7 +175,6 @@ Interactive commands:
 - `/replay`
 - `/skills`
 - `/skill <name>`
-- `/skill recommend <task>`
 - `/snapshots`
 - `/yolo`
 - `/yolo on`
@@ -233,8 +232,6 @@ Interactive command reference:
   - lists discovered skills that are visible to the current agent after `permission.skill` filtering
 - `/skill <name>`
   - loads one skill through the unified `skill` tool and prints the injected instruction block
-- `/skill recommend <task>`
-  - explains which skill would be auto-selected for a task and why
 - `/snapshots`
   - lists persisted git-backed snapshots for the current session, including snapshot tree hashes, tool call ids, and changed files
 - `/yolo`
@@ -295,7 +292,7 @@ Core implementation:
 - `tools/builtin/integration.py`
   - exposes the unified `skill` tool with `action=list` and `name=<skill>`
 - `agent/runtime.py`
-  - injects available skill summaries into the system prompt, auto-selects high-confidence skills per turn, and provides `--skills`, `--skill`, `/skills`, and `/skill <name>`
+  - injects available skill summaries into the system prompt and provides `--skills`, `--skill`, `/skills`, and `/skill <name>`; the model decides whether to call the unified `skill` tool for the current task
 - `permission/policy.py`
   - evaluates `permission="skill"` with the skill name as the pattern, so agents can allow or deny individual skills using the same rule engine as tools
 
@@ -359,7 +356,6 @@ CLI checks:
 ```bash
 openagent --skills
 openagent --skill openai-docs
-openagent --skill-recommend "How do I use the OpenAI Responses API?"
 OPENAGENT_SKILL_PATHS=/tmp/my-skills openagent --skills
 ```
 
@@ -374,12 +370,21 @@ The current repository has been validated against existing global skills:
 - `skill-installer`
   - installation workflow example
 
-Skill auto-selection:
+Model-driven skill usage:
 
-- The runtime scores visible skills against the active agent profile and current user task using only `name`, `description`, `metadata`, and compatibility hints.
-- High-confidence matches are recorded as `skill` message parts, shown in `/replay` and `/inspect`, and loaded into the current turn's system prompt.
-- Full skill bodies are still lazy: only selected skills are loaded. Other available skills remain summarized by name and description.
-- Use `openagent --skill-recommend "<task>"` or `/skill recommend <task>` to see the exact skills and reasons that would be selected before running a task.
+- The runtime exposes only visible skill names and descriptions in the system prompt.
+- The model decides whether a skill matches the task. If it does, it must call the unified `skill` tool to load that skill body before following the workflow.
+- Full skill bodies remain lazy and are never auto-injected by deterministic runtime scoring.
+- If no listed skill clearly matches, the model should continue without calling `skill`.
+
+Bundled project-level validation skills:
+
+- `playwright`
+  - copied from the official `openai/skills` curated collection for browser automation workflow validation
+- `security-threat-model`
+  - copied from the official `openai/skills` curated collection for security analysis workflow validation
+- `doc`
+  - copied from the official `openai/skills` curated collection for document workflow validation
 
 ## Minimal Demo
 

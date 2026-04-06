@@ -157,7 +157,6 @@ OpenAgent scans OpenCode `.opencode/{skill,skills}` directories and compatible `
 ```bash
 openagent --skills
 openagent --skill openai-docs
-openagent --skill-recommend "How do I use the OpenAI Responses API?"
 OPENAGENT_SKILL_PATHS=/tmp/my-skills openagent --skills
 ```
 
@@ -166,5 +165,6 @@ Interactive:
 ```text
 /skills
 /skill openai-docs
-/skill recommend How do I use the OpenAI Responses API?
 ```
+
+Runtime selection is model-driven. OpenAgent shows visible skill names and descriptions in the system prompt, but it does not deterministically select or inject a skill body. The model must call the unified `skill` tool when it decides that a listed skill matches the current task.
