@@ -8,6 +8,7 @@ Use tools when needed.
 Prefer reading files before editing them.
 Prefer dedicated tools (`ls`, `glob`, `grep`, `codesearch`, `read_file`, `read_file_range`, `read_symbol`, `ensure_dir`, `write_file`, `append_file`, `edit_file`, `replace_all`, `insert_text`, `apply_patch`) over `bash` whenever they are sufficient for the task.
 You also have opencode-style aliases (`read`, `write`, `edit`, `patch`, `task`, `todowrite`, `todoread`, `question`, `skill`, `lsp`, `codesearch`, `batch`, `webfetch`, `websearch`) that should be used deliberately when they better match the user's request.
+If MCP tools are available, they appear as normal tools named `mcp__<server>__<tool>`; use them only when their server/tool description directly matches the user's request, and do not invent MCP tool names.
 For plain workspace file reads, use `read_file`, `read_file_range`, or `read_symbol` instead of `bash`.
 For directory inspection, use `ls` or `glob` instead of `bash`.
 For directory creation, use `ensure_dir` instead of `bash mkdir -p`.

@@ -21,6 +21,7 @@ from openagent.domain.tools import ToolContext
 from openagent.events.bus import EventBus
 from openagent.events.logger import get_logger
 from openagent.lsp import LspManager
+from openagent.mcp import McpGetPromptTool, McpManager, McpReadResourceTool, McpTool
 from openagent.providers.base import BaseProvider
 from openagent.providers.factory import build_provider
 from openagent.permission.policy import SessionPermissionPolicy
@@ -104,6 +105,11 @@ class AgentRuntime:
         )
         self.lsp_manager = LspManager(self.workspace, event_bus=self.event_bus) if self.settings.lsp_enabled else None
         self.skill_manager = SkillManager(self.workspace, extra_paths=self.settings.skill_paths)
+        self.mcp_manager = (
+            McpManager(self.workspace, config_paths=self.settings.mcp_config_paths, event_bus=self.event_bus)
+            if self.settings.mcp_enabled
+            else None
+        )
         self.snapshot_manager = SnapshotManager(
             self.session_manager.store,
             self.workspace,
@@ -370,6 +376,51 @@ class AgentRuntime:
         result = self.registry.invoke("skill", {"name": name}, context)
         return result.content
 
+    def mcp_status_report(self) -> str:
+        if self.mcp_manager is None:
+            return json.dumps({"enabled": False, "servers": []}, ensure_ascii=False, indent=2)
+        payload = {"enabled": True, "servers": [state.to_dict() for state in self.mcp_manager.list_states()]}
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def mcp_tools_report(self) -> str:
+        if self.mcp_manager is None:
+            return json.dumps({"enabled": False, "tools": []}, ensure_ascii=False, indent=2)
+        payload = {"enabled": True, "tools": [tool.to_dict() for tool in self.mcp_manager.list_tools()]}
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def mcp_resources_report(self) -> str:
+        if self.mcp_manager is None:
+            return json.dumps({"enabled": False, "resources": {}}, ensure_ascii=False, indent=2)
+        return json.dumps({"enabled": True, "resources": self.mcp_manager.list_resources()}, ensure_ascii=False, indent=2)
+
+    def mcp_prompts_report(self) -> str:
+        if self.mcp_manager is None:
+            return json.dumps({"enabled": False, "prompts": {}}, ensure_ascii=False, indent=2)
+        return json.dumps({"enabled": True, "prompts": self.mcp_manager.list_prompts()}, ensure_ascii=False, indent=2)
+
+    def mcp_call(self, server: str, tool: str, arguments: dict[str, Any]) -> str:
+        if self.mcp_manager is None:
+            return "MCP is disabled."
+        tool_id = f"mcp__{self._safe_mcp_name(server)}__{self._safe_mcp_name(tool)}"
+        context = self.loop.tool_context.child(metadata={"tool_name": tool_id})
+        return self.registry.invoke(tool_id, arguments, context).content
+
+    def mcp_read_resource(self, server: str, uri: str) -> str:
+        if self.mcp_manager is None:
+            return "MCP is disabled."
+        context = self.loop.tool_context.child(metadata={"tool_name": "mcp_read_resource"})
+        return self.registry.invoke("mcp_read_resource", {"server": server, "uri": uri}, context).content
+
+    def mcp_get_prompt(self, server: str, name: str, arguments: dict[str, Any]) -> str:
+        if self.mcp_manager is None:
+            return "MCP is disabled."
+        context = self.loop.tool_context.child(metadata={"tool_name": "mcp_get_prompt"})
+        return self.registry.invoke(
+            "mcp_get_prompt",
+            {"server": server, "name": name, "arguments": arguments},
+            context,
+        ).content
+
     def retry_last_turn(self) -> str:
         last_user_message = self.session_manager.retry_last_turn(self.session)
         if not last_user_message:
@@ -521,6 +572,12 @@ class AgentRuntime:
         registry.register(BashTool(timeout_seconds=self.settings.bash_timeout_seconds))
         registry.register(DelegateTool(self.subagent_manager))
         registry.register(TaskTool(self.subagent_manager))
+        if self.mcp_manager is not None:
+            self.mcp_manager.connect_all()
+            registry.register(McpReadResourceTool(self.mcp_manager))
+            registry.register(McpGetPromptTool(self.mcp_manager))
+            for info in self.mcp_manager.list_tools():
+                registry.register(McpTool(self.mcp_manager, info))
         return registry
 
     def _build_registry_for_profile(self, profile: AgentProfile) -> ToolRegistry:
@@ -561,6 +618,7 @@ class AgentRuntime:
             "skill_manager": self.skill_manager,
             "skill_allowed": self._skill_allowed_for_agent(agent_name),
             "lsp_manager": self.lsp_manager,
+            "mcp_manager": self.mcp_manager,
             "agent_name": agent_name,
             "active_agent": self.agent_profile.name,
             "agent_registry": self.agent_registry,
@@ -839,6 +897,12 @@ class AgentRuntime:
             if root not in seen:
                 seen.append(root)
         return seen
+
+    @staticmethod
+    def _safe_mcp_name(value: str) -> str:
+        safe = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in value.strip())
+        safe = "_".join(part for part in safe.split("_") if part)
+        return safe or "unnamed"
 
     def _skill_prompt_for(self, profile: AgentProfile) -> str:
         try:

@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "mcp-server-filesystem",
+      "args": ["{workspace}/work"],
+      "enabled": true,
+      "timeout": 30
+    },
+    "git": {
+      "type": "stdio",
+      "command": "mcp-git",
+      "enabled": true,
+      "timeout": 30
+    },
+    "everything": {
+      "type": "stdio",
+      "command": "mcp-server-everything",
+      "enabled": true,
+      "timeout": 30
+    }
+  }
+}

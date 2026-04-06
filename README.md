@@ -24,6 +24,7 @@ src/openagent/
   domain/      core models
   events/      event bus and logger
   extensions/  permission and future integration hooks
+  mcp/         Model Context Protocol server manager, stdio client, and tool adapters
   providers/   anthropic / volcengine
   session/     session store, manager, processor, prompt, compaction, summary
   skill/       OpenCode-style SKILL.md discovery, validation, and loading
@@ -94,6 +95,11 @@ The main runtime state flows are:
   - `skill/manager.py`
   - `tools/builtin/integration.py`
   - `agent/runtime.py`
+- MCP server lifecycle / dynamic tool injection
+  - `mcp/manager.py`
+  - `mcp/client.py`
+  - `mcp/tool.py`
+  - `agent/runtime.py`
 
 ## Run
 
@@ -159,6 +165,9 @@ openagent --workspace . --session-id <session_id> --inspect
 openagent --workspace . --session-id <session_id> --replay
 openagent --workspace . --skills
 openagent --workspace . --skill openai-docs
+openagent --workspace . --mcp
+openagent --workspace . --mcp-tools
+openagent --workspace . --mcp-call filesystem list_directory '{"path":"/root/open-claude-code/work"}'
 openagent --workspace . --prompt "创建一个 demo.txt"
 openagent --workspace . --stream --prompt "请只回复 stream-ok。"
 ```
@@ -175,6 +184,13 @@ Interactive commands:
 - `/replay`
 - `/skills`
 - `/skill <name>`
+- `/mcp`
+- `/mcp tools`
+- `/mcp resources`
+- `/mcp prompts`
+- `/mcp call <server> <tool> [json]`
+- `/mcp resource <server> <uri>`
+- `/mcp prompt <server> <name> [json]`
 - `/snapshots`
 - `/yolo`
 - `/yolo on`
@@ -232,6 +248,20 @@ Interactive command reference:
   - lists discovered skills that are visible to the current agent after `permission.skill` filtering
 - `/skill <name>`
   - loads one skill through the unified `skill` tool and prints the injected instruction block
+- `/mcp`
+  - lists configured MCP servers with source, status, command, capability counts, and last error
+- `/mcp tools`
+  - lists MCP tools exposed into the normal tool registry; ids use `mcp__<server>__<tool>`
+- `/mcp resources`
+  - lists resources reported by MCP servers
+- `/mcp prompts`
+  - lists prompts reported by MCP servers
+- `/mcp call <server> <tool> [json]`
+  - manually invokes an MCP tool through the same registry and permission path as model tool calls
+- `/mcp resource <server> <uri>`
+  - reads an MCP resource through `mcp_read_resource`
+- `/mcp prompt <server> <name> [json]`
+  - gets an MCP prompt through `mcp_get_prompt`
 - `/snapshots`
   - lists persisted git-backed snapshots for the current session, including snapshot tree hashes, tool call ids, and changed files
 - `/yolo`
@@ -276,6 +306,95 @@ Interactive command reference:
   - discards the current multiline input buffer before submission
 - `/exit`
   - exits the REPL
+
+## MCP Runtime
+
+OpenAgent implements an OpenCode-style MCP integration where each MCP server is a managed runtime entity, and server tools are adapted into the existing tool registry rather than handled by a parallel path.
+
+Full MCP rules are documented in [MCP.md](MCP.md).
+
+Core implementation:
+
+- `mcp/models.py`
+  - structured server config, server state, and discovered tool info
+- `mcp/client.py`
+  - stdio JSON-RPC client with initialize, capability listing, tool calls, resource reads, prompt fetches, timeout handling, and shutdown
+- `mcp/manager.py`
+  - config discovery, server lifecycle, capability cache, multi-server isolation, status tracking, and reconnect-on-demand
+- `mcp/tool.py`
+  - adapts MCP tools/resources/prompts into normal `BaseTool` implementations
+- `agent/runtime.py`
+  - loads MCP config, connects enabled servers, registers dynamic MCP tools, and exposes CLI report/call helpers
+- `tools/registry.py`
+  - remains the single invocation point, so MCP tool calls still use lifecycle events, permission checks, truncation, and structured results
+
+Config sources:
+
+- `openagent.mcp.json`
+- `.opencode/mcp.json`
+- `OPENAGENT_MCP_CONFIG=/path/a.json:/path/b.json`
+- `OPENAGENT_MCP=false` disables MCP without changing normal tool execution
+
+Example config:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "type": "stdio",
+      "command": "mcp-server-filesystem",
+      "args": ["{workspace}/work"],
+      "enabled": true,
+      "timeout": 30
+    }
+  }
+}
+```
+
+The repository includes `openagent.mcp.json` configured for:
+
+- `filesystem`
+  - `@modelcontextprotocol/server-filesystem`, scoped to `{workspace}/work`
+- `git`
+  - `mcp-git`, development/tooling validation
+- `everything`
+  - `@modelcontextprotocol/server-everything`, general MCP capability validation
+
+Install the validation servers when needed:
+
+```bash
+npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-everything mcp-git
+```
+
+CLI checks:
+
+```bash
+openagent --mcp
+openagent --mcp-tools
+openagent --mcp-resources
+openagent --mcp-prompts
+openagent --yolo --mcp-call git git_status '{"repo_path":"/root/open-claude-code"}'
+openagent --yolo --mcp-call filesystem list_directory '{"path":"/root/open-claude-code/work"}'
+```
+
+Agent-loop check:
+
+```text
+请使用 MCP filesystem 的 list_directory 工具列出 /root/open-claude-code/work 目录，然后只回复是否看到了 yolo_ok.txt。
+```
+
+Expected evidence in `/replay`:
+
+```text
+ToolRequest: mcp__filesystem__list_directory {"path": "/root/open-claude-code/work"}
+ToolResult: mcp__filesystem__list_directory -> ...
+```
+
+Current limits:
+
+- `stdio` MCP transport is implemented and verified. HTTP/SSE/OAuth transports are recognized as config types but reported as unsupported.
+- resource and prompt capabilities are listed and callable through generic tools; some third-party servers may time out or return errors for specific resource URIs, and those failures are surfaced rather than hidden.
+- MCP permission policy currently uses normal tool names such as `mcp__everything__echo`; dedicated `permission.mcp` namespacing can be added later if needed.
 
 ## Skill Runtime
 

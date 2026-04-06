@@ -24,6 +24,8 @@ class Settings:
     snapshot_enabled: bool = True
     lsp_enabled: bool = True
     skill_paths: list[str] = field(default_factory=list)
+    mcp_enabled: bool = True
+    mcp_config_paths: list[str] = field(default_factory=list)
 
     @classmethod
     def from_workspace(cls, workspace: str | Path) -> "Settings":
@@ -47,6 +49,8 @@ class Settings:
         snapshot_enabled = os.getenv("OPENAGENT_SNAPSHOT", "true").lower() in {"1", "true", "yes", "on"}
         lsp_enabled = os.getenv("OPENAGENT_LSP", "true").lower() in {"1", "true", "yes", "on"}
         skill_paths = [item for item in os.getenv("OPENAGENT_SKILL_PATHS", "").split(os.pathsep) if item]
+        mcp_enabled = os.getenv("OPENAGENT_MCP", "true").lower() in {"1", "true", "yes", "on"}
+        mcp_config_paths = [item for item in os.getenv("OPENAGENT_MCP_CONFIG", "").split(os.pathsep) if item]
         return cls(
             workspace=workspace_path,
             session_root=state_root / "sessions",
@@ -65,4 +69,6 @@ class Settings:
             snapshot_enabled=snapshot_enabled,
             lsp_enabled=lsp_enabled,
             skill_paths=skill_paths,
+            mcp_enabled=mcp_enabled,
+            mcp_config_paths=mcp_config_paths,
         )

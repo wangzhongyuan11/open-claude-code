@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import codecs
+import json
 import os
 import shlex
 import sys
@@ -33,6 +34,7 @@ SHELL_COMMANDS = {
     "/inspect",
     "/replay",
     "/skills",
+    "/mcp",
     "/snapshots",
     "/yolo",
     "/compact",
@@ -52,6 +54,13 @@ HELP_TEXT = """Available interactive commands:
 /replay                   Print a turn-by-turn replay view
 /skills                   List discovered and permission-visible skills
 /skill <name>             Load one skill through the unified skill tool
+/mcp                      List configured MCP servers and status
+/mcp tools                List MCP tools exposed through the tool registry
+/mcp resources            List MCP resources by server
+/mcp prompts              List MCP prompts by server
+/mcp call <server> <tool> [json]  Call an MCP tool manually
+/mcp resource <server> <uri>      Read an MCP resource manually
+/mcp prompt <server> <name> [json] Get an MCP prompt manually
 /snapshots                List persisted file snapshots for the current session
 /yolo                     Print YOLO mode status
 /yolo on                  Enable YOLO mode (auto-approve ask permissions, deny still applies)
@@ -87,6 +96,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--replay", action="store_true", help="Print a turn-by-turn session replay view and exit")
     parser.add_argument("--skills", action="store_true", help="List discovered and permission-visible skills and exit")
     parser.add_argument("--skill", default=None, help="Load one skill by name and exit")
+    parser.add_argument("--mcp", action="store_true", help="List configured MCP servers and exit")
+    parser.add_argument("--mcp-tools", action="store_true", help="List MCP tools and exit")
+    parser.add_argument("--mcp-resources", action="store_true", help="List MCP resources and exit")
+    parser.add_argument("--mcp-prompts", action="store_true", help="List MCP prompts and exit")
+    parser.add_argument("--mcp-call", nargs=3, metavar=("SERVER", "TOOL", "JSON"), help="Call an MCP tool and exit")
+    parser.add_argument("--mcp-resource", nargs=2, metavar=("SERVER", "URI"), help="Read an MCP resource and exit")
+    parser.add_argument("--mcp-prompt", nargs=3, metavar=("SERVER", "NAME", "JSON"), help="Get an MCP prompt and exit")
     parser.add_argument("--prompt", default=None, help="Run one prompt and exit")
     parser.add_argument("--stream", action="store_true", help="Render assistant text deltas while the model is responding")
     parser.add_argument("--yolo", action="store_true", default=None, help="Enable YOLO mode for this runtime")
@@ -199,6 +215,7 @@ def _classify_repl_text(text: str) -> tuple[str, str] | None:
         or stripped.startswith("/todo ")
         or stripped.startswith("/agent ")
         or stripped.startswith("/skill ")
+        or stripped.startswith("/mcp ")
         or stripped.startswith("/yolo ")
         or stripped.startswith("/rollback ")
     ):
@@ -380,6 +397,7 @@ def _read_repl_input(session: PromptSession | None = None) -> tuple[str, str] | 
                 or stripped.startswith("/todo ")
                 or stripped.startswith("/agent ")
                 or stripped.startswith("/skill ")
+                or stripped.startswith("/mcp ")
                 or stripped.startswith("/yolo ")
                 or stripped.startswith("/rollback ")
             ):
@@ -457,6 +475,37 @@ def main() -> None:
         print(runtime.load_skill(args.skill))
         return
 
+    if args.mcp:
+        print(runtime.mcp_status_report())
+        return
+
+    if args.mcp_tools:
+        print(runtime.mcp_tools_report())
+        return
+
+    if args.mcp_resources:
+        print(runtime.mcp_resources_report())
+        return
+
+    if args.mcp_prompts:
+        print(runtime.mcp_prompts_report())
+        return
+
+    if args.mcp_call:
+        server, tool, raw_args = args.mcp_call
+        print(runtime.mcp_call(server, tool, json.loads(raw_args)))
+        return
+
+    if args.mcp_resource:
+        server, uri = args.mcp_resource
+        print(runtime.mcp_read_resource(server, uri))
+        return
+
+    if args.mcp_prompt:
+        server, name, raw_args = args.mcp_prompt
+        print(runtime.mcp_get_prompt(server, name, json.loads(raw_args)))
+        return
+
     if args.prompt is not None:
         _print_session_summary(runtime)
         _run_once(runtime, args.prompt, stream=args.stream)
@@ -513,6 +562,42 @@ def main() -> None:
                 print(runtime.load_skill(parts[1]))
                 continue
             print("Usage: /skill <name>")
+            continue
+        if item_type == "command" and user_input.startswith("/mcp"):
+            parts = shlex.split(user_input)
+            if len(parts) == 1:
+                print(runtime.mcp_status_report())
+                continue
+            if len(parts) == 2 and parts[1] == "tools":
+                print(runtime.mcp_tools_report())
+                continue
+            if len(parts) == 2 and parts[1] == "resources":
+                print(runtime.mcp_resources_report())
+                continue
+            if len(parts) == 2 and parts[1] == "prompts":
+                print(runtime.mcp_prompts_report())
+                continue
+            if len(parts) >= 4 and parts[1] == "call":
+                try:
+                    arguments = json.loads(" ".join(parts[4:])) if len(parts) > 4 else {}
+                    print(runtime.mcp_call(parts[2], parts[3], arguments))
+                except Exception as exc:
+                    print(f"MCP call failed: {exc}")
+                continue
+            if len(parts) >= 4 and parts[1] == "resource":
+                try:
+                    print(runtime.mcp_read_resource(parts[2], " ".join(parts[3:])))
+                except Exception as exc:
+                    print(f"MCP resource failed: {exc}")
+                continue
+            if len(parts) >= 4 and parts[1] == "prompt":
+                try:
+                    arguments = json.loads(" ".join(parts[4:])) if len(parts) > 4 else {}
+                    print(runtime.mcp_get_prompt(parts[2], parts[3], arguments))
+                except Exception as exc:
+                    print(f"MCP prompt failed: {exc}")
+                continue
+            print("Usage: /mcp | /mcp tools | /mcp resources | /mcp prompts | /mcp call <server> <tool> [json] | /mcp resource <server> <uri> | /mcp prompt <server> <name> [json]")
             continue
         if item_type == "command" and user_input == "/snapshots":
             print(runtime.list_snapshots())

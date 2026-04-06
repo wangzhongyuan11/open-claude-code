@@ -20,6 +20,21 @@ def test_cli_parser_accepts_prompt_and_print_session():
             "--skills",
             "--skill",
             "openai-docs",
+            "--mcp",
+            "--mcp-tools",
+            "--mcp-resources",
+            "--mcp-prompts",
+            "--mcp-call",
+            "everything",
+            "echo",
+            '{"message":"ok"}',
+            "--mcp-resource",
+            "everything",
+            "demo://resource/static/document/architecture.md",
+            "--mcp-prompt",
+            "everything",
+            "simple-prompt",
+            "{}",
         ]
     )
 
@@ -31,6 +46,13 @@ def test_cli_parser_accepts_prompt_and_print_session():
     assert args.agent == "plan"
     assert args.skills is True
     assert args.skill == "openai-docs"
+    assert args.mcp is True
+    assert args.mcp_tools is True
+    assert args.mcp_resources is True
+    assert args.mcp_prompts is True
+    assert args.mcp_call == ["everything", "echo", '{"message":"ok"}']
+    assert args.mcp_resource == ["everything", "demo://resource/static/document/architecture.md"]
+    assert args.mcp_prompt == ["everything", "simple-prompt", "{}"]
 
 
 def test_cli_parser_accepts_agent_create_and_show():
@@ -92,6 +114,19 @@ def test_repl_reader_treats_snapshot_commands_as_commands():
 def test_repl_reader_treats_skill_commands_as_commands():
     assert _classify_repl_text("/skills") == ("command", "/skills")
     assert _classify_repl_text("/skill openai-docs") == ("command", "/skill openai-docs")
+
+
+def test_repl_reader_treats_mcp_commands_as_commands():
+    assert _classify_repl_text("/mcp") == ("command", "/mcp")
+    assert _classify_repl_text("/mcp tools") == ("command", "/mcp tools")
+    assert _classify_repl_text('/mcp call everything echo {"message":"ok"}') == (
+        "command",
+        '/mcp call everything echo {"message":"ok"}',
+    )
+    assert _classify_repl_text("/mcp resource everything demo://resource/static/document/architecture.md") == (
+        "command",
+        "/mcp resource everything demo://resource/static/document/architecture.md",
+    )
 
 
 def test_classify_repl_text_treats_cancel_as_noop(capsys):
