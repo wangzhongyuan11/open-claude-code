@@ -56,6 +56,22 @@ def test_skill_manager_reports_invalid_names_missing_fields_and_duplicates(tmp_p
     assert [skill.name for skill in result.skills] == ["dup-skill"]
 
 
+def test_skill_manager_parses_multiline_frontmatter_lists(tmp_path: Path):
+    workspace = tmp_path / "repo"
+    home = tmp_path / "home"
+    skill = workspace / ".opencode" / "skills" / "cloudflare" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text(
+        "---\nname: cloudflare\ndescription: Use for Cloudflare workers.\ncompatibility:\n  - workers\n  - durable-objects\n---\n# Cloudflare\n",
+        encoding="utf-8",
+    )
+
+    result = SkillManager(workspace, home=home).refresh()
+
+    assert not result.errors
+    assert result.skills[0].compatibility == ["workers", "durable-objects"]
+
+
 def test_skill_permission_can_deny_specific_skill(tmp_path: Path):
     store = SessionStore(tmp_path / "sessions")
     session = store.create(tmp_path)

@@ -176,7 +176,15 @@ def _parse_simple_yaml(raw: str) -> dict[str, Any]:
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         if line.startswith(" ") and current_map:
-            key, value = _split_yaml_pair(line.strip())
+            stripped = line.strip()
+            if stripped.startswith("- "):
+                target = result.get(current_map)
+                if not isinstance(target, list):
+                    target = []
+                    result[current_map] = target
+                target.append(_parse_scalar(stripped[2:].strip()))
+                continue
+            key, value = _split_yaml_pair(stripped)
             target = result.setdefault(current_map, {})
             if isinstance(target, dict):
                 target[key] = _parse_scalar(value)
