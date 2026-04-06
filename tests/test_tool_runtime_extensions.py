@@ -208,13 +208,72 @@ def test_question_tool_uses_runtime_handler(tmp_path: Path):
 def test_skill_tool_loads_skill_content(tmp_path: Path):
     skill_dir = tmp_path / "skills" / "demo-skill"
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("# Demo Skill\nUse this skill.\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: demo-skill\ndescription: Use for demo tasks.\n---\n# Demo Skill\nUse this skill.\n",
+        encoding="utf-8",
+    )
     (skill_dir / "notes.txt").write_text("note", encoding="utf-8")
     context = ToolContext(workspace=tmp_path, runtime_state={"skill_roots": [str(tmp_path / "skills")]})
     result = SkillTool().invoke({"name": "demo-skill"}, context)
     assert not result.is_error
     assert "<skill_content name=\"demo-skill\">" in result.content
     assert "notes.txt" in result.content
+
+
+def test_skill_tool_lists_errors_for_invalid_skill(tmp_path: Path):
+    invalid_dir = tmp_path / "skills" / "Bad Skill"
+    invalid_dir.mkdir(parents=True)
+    (invalid_dir / "SKILL.md").write_text("# Missing frontmatter\n", encoding="utf-8")
+    context = ToolContext(workspace=tmp_path, runtime_state={"skill_roots": [str(tmp_path / "skills")]})
+
+    result = SkillTool().invoke({"action": "list"}, context)
+
+    assert not result.is_error
+    assert "<skill_errors>" in result.content
+    assert "frontmatter_error" in result.content
+
+
+def test_skill_tool_filters_denied_skills_from_list(tmp_path: Path):
+    root = tmp_path / "skills"
+    for name in ["allowed-skill", "blocked-skill"]:
+        skill_dir = root / name
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: Use {name}.\n---\n# {name}\n",
+            encoding="utf-8",
+        )
+    context = ToolContext(
+        workspace=tmp_path,
+        runtime_state={
+            "skill_roots": [str(root)],
+            "skill_allowed": lambda name: name != "blocked-skill",
+        },
+    )
+
+    result = SkillTool().invoke({"action": "list"}, context)
+
+    assert "allowed-skill" in result.content
+    assert "blocked-skill" not in result.content
+    assert result.metadata["denied_count"] == "1"
+
+
+def test_skill_tool_denies_loading_blocked_skill(tmp_path: Path):
+    root = tmp_path / "skills"
+    skill_dir = root / "blocked-skill"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: blocked-skill\ndescription: Use blocked skill.\n---\n# Blocked\n",
+        encoding="utf-8",
+    )
+    context = ToolContext(
+        workspace=tmp_path,
+        runtime_state={"skill_roots": [str(root)], "skill_allowed": lambda _name: False},
+    )
+
+    result = SkillTool().invoke({"name": "blocked-skill"}, context)
+
+    assert result.is_error
+    assert result.error and result.error.type == "permission_denied"
 
 
 def test_lsp_python_fallback_and_codesearch(tmp_path: Path):

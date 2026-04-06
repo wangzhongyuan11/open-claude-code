@@ -37,6 +37,7 @@ from openagent.session.task_validation import (
     parse_multistep_requirements,
     validate_multistep_requirements,
 )
+from openagent.skill import SkillManager
 from openagent.tools.builtin.bash import BashTool
 from openagent.tools.builtin.background import BackgroundTaskTool
 from openagent.tools.builtin.delegate import DelegateTool
@@ -102,6 +103,7 @@ class AgentRuntime:
             event_bus=self.event_bus,
         )
         self.lsp_manager = LspManager(self.workspace, event_bus=self.event_bus) if self.settings.lsp_enabled else None
+        self.skill_manager = SkillManager(self.workspace, extra_paths=self.settings.skill_paths)
         self.snapshot_manager = SnapshotManager(
             self.session_manager.store,
             self.workspace,
@@ -343,6 +345,28 @@ class AgentRuntime:
         changed = self.session_manager.revert_last_turn(self.session)
         return "Reverted last turn." if changed else "No turn to revert."
 
+    def list_skills(self) -> str:
+        policy = SessionPermissionPolicy(
+            self.session_manager.store,
+            self.agent_profile,
+            yolo=self.session.permission.get("yolo", self.settings.yolo_mode),
+            event_bus=self.event_bus,
+        )
+        result = self.skill_manager.discover()
+        allowed = [skill for skill in result.skills if policy.allows_skill(self.session.id, skill.name)]
+        payload = {
+            "skills": [skill.to_dict() for skill in allowed],
+            "denied": [skill.name for skill in result.skills if skill not in allowed],
+            "errors": [error.to_dict() for error in result.errors],
+            "roots": result.roots,
+        }
+        return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def load_skill(self, name: str) -> str:
+        context = self.loop.tool_context.child(metadata={"tool_name": "skill"})
+        result = self.registry.invoke("skill", {"name": name}, context)
+        return result.content
+
     def retry_last_turn(self) -> str:
         last_user_message = self.session_manager.retry_last_turn(self.session)
         if not last_user_message:
@@ -531,6 +555,8 @@ class AgentRuntime:
             "ask_questions": self.question_handler,
             "ask_permission": permission_handler,
             "skill_roots": self._skill_roots(),
+            "skill_manager": self.skill_manager,
+            "skill_allowed": self._skill_allowed_for_agent(agent_name),
             "lsp_manager": self.lsp_manager,
             "agent_name": agent_name,
             "active_agent": self.agent_profile.name,
@@ -617,7 +643,11 @@ class AgentRuntime:
         return self.registry.invoke(tool_name, arguments, context)
 
     def _system_prompt_for(self, profile: AgentProfile) -> str:
-        return build_system_prompt(self.session, compose_agent_prompt(profile))
+        prompt = compose_agent_prompt(profile)
+        skills = self._skill_prompt_for(profile)
+        if skills:
+            prompt = prompt + "\n\n" + skills
+        return build_system_prompt(self.session, prompt)
 
     def _system_prompt_for_agent_name(self, agent_name: str) -> str:
         profile = self.agent_registry.get(agent_name)
@@ -806,6 +836,42 @@ class AgentRuntime:
             if root not in seen:
                 seen.append(root)
         return seen
+
+    def _skill_prompt_for(self, profile: AgentProfile) -> str:
+        try:
+            policy = SessionPermissionPolicy(
+                self.session_manager.store,
+                profile,
+                yolo=self.session.permission.get("yolo", self.settings.yolo_mode),
+                event_bus=self.event_bus,
+            )
+            result = self.skill_manager.discover()
+            available = [skill for skill in result.skills if policy.allows_skill(self.session.id, skill.name)]
+            if not available:
+                return ""
+            return "\n".join(
+                [
+                    "Skills provide specialized instructions and workflows for specific tasks.",
+                    "Use the `skill` tool to load a skill only when the user task matches its description.",
+                    self.skill_manager.format_available(verbose=True, skills=available),
+                ]
+            )
+        except Exception:
+            return ""
+
+    def _skill_allowed_for_agent(self, agent_name: str):
+        profile = self.agent_registry.get(agent_name)
+
+        def allowed(skill_name: str) -> bool:
+            policy = SessionPermissionPolicy(
+                self.session_manager.store,
+                profile,
+                yolo=self.session.permission.get("yolo", self.settings.yolo_mode),
+                event_bus=self.event_bus,
+            )
+            return policy.allows_skill(self.session.id, skill_name)
+
+        return allowed
 
     def _emit(self, event_type: str, payload: dict) -> None:
         if self.event_bus is None:

@@ -7,7 +7,20 @@ def test_cli_parser_accepts_prompt_and_print_session():
     parser = build_parser()
 
     args: Namespace = parser.parse_args(
-        ["--workspace", ".", "--print-session", "--status", "--prompt", "hello", "--stream", "--agent", "plan"]
+        [
+            "--workspace",
+            ".",
+            "--print-session",
+            "--status",
+            "--prompt",
+            "hello",
+            "--stream",
+            "--agent",
+            "plan",
+            "--skills",
+            "--skill",
+            "openai-docs",
+        ]
     )
 
     assert args.workspace == "."
@@ -16,6 +29,8 @@ def test_cli_parser_accepts_prompt_and_print_session():
     assert args.prompt == "hello"
     assert args.stream is True
     assert args.agent == "plan"
+    assert args.skills is True
+    assert args.skill == "openai-docs"
 
 
 def test_cli_parser_accepts_agent_create_and_show():
@@ -72,6 +87,11 @@ def test_repl_reader_treats_yolo_toggle_as_command(monkeypatch):
 def test_repl_reader_treats_snapshot_commands_as_commands():
     assert _classify_repl_text("/snapshots") == ("command", "/snapshots")
     assert _classify_repl_text("/rollback last") == ("command", "/rollback last")
+
+
+def test_repl_reader_treats_skill_commands_as_commands():
+    assert _classify_repl_text("/skills") == ("command", "/skills")
+    assert _classify_repl_text("/skill openai-docs") == ("command", "/skill openai-docs")
 
 
 def test_classify_repl_text_treats_cancel_as_noop(capsys):

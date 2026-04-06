@@ -32,6 +32,7 @@ SHELL_COMMANDS = {
     "/summary",
     "/inspect",
     "/replay",
+    "/skills",
     "/snapshots",
     "/yolo",
     "/compact",
@@ -49,6 +50,8 @@ HELP_TEXT = """Available interactive commands:
 /summary                  Print a PR-style conversation summary
 /inspect                  Print a structured JSON inspect view
 /replay                   Print a turn-by-turn replay view
+/skills                   List discovered and permission-visible skills
+/skill <name>             Load one skill through the unified skill tool
 /snapshots                List persisted file snapshots for the current session
 /yolo                     Print YOLO mode status
 /yolo on                  Enable YOLO mode (auto-approve ask permissions, deny still applies)
@@ -82,6 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--summary", action="store_true", help="Print a PR-style conversation summary and exit")
     parser.add_argument("--inspect", action="store_true", help="Print a structured session inspection view and exit")
     parser.add_argument("--replay", action="store_true", help="Print a turn-by-turn session replay view and exit")
+    parser.add_argument("--skills", action="store_true", help="List discovered and permission-visible skills and exit")
+    parser.add_argument("--skill", default=None, help="Load one skill by name and exit")
     parser.add_argument("--prompt", default=None, help="Run one prompt and exit")
     parser.add_argument("--stream", action="store_true", help="Render assistant text deltas while the model is responding")
     parser.add_argument("--yolo", action="store_true", help="Enable YOLO mode for this runtime")
@@ -193,6 +198,7 @@ def _classify_repl_text(text: str) -> tuple[str, str] | None:
         stripped in SHELL_COMMANDS
         or stripped.startswith("/todo ")
         or stripped.startswith("/agent ")
+        or stripped.startswith("/skill ")
         or stripped.startswith("/yolo ")
         or stripped.startswith("/rollback ")
     ):
@@ -369,7 +375,14 @@ def _read_repl_input(session: PromptSession | None = None) -> tuple[str, str] | 
                 continue
             if stripped in {"/exit", "exit", "quit"}:
                 return ("command", "/exit")
-            if stripped in SHELL_COMMANDS or stripped.startswith("/todo ") or stripped.startswith("/agent ") or stripped.startswith("/yolo ") or stripped.startswith("/rollback "):
+            if (
+                stripped in SHELL_COMMANDS
+                or stripped.startswith("/todo ")
+                or stripped.startswith("/agent ")
+                or stripped.startswith("/skill ")
+                or stripped.startswith("/yolo ")
+                or stripped.startswith("/rollback ")
+            ):
                 return ("command", stripped)
         if stripped == "/cancel":
             print("[cancelled]")
@@ -436,6 +449,14 @@ def main() -> None:
         print(runtime.replay_session())
         return
 
+    if args.skills:
+        print(runtime.list_skills())
+        return
+
+    if args.skill:
+        print(runtime.load_skill(args.skill))
+        return
+
     if args.prompt is not None:
         _print_session_summary(runtime)
         _run_once(runtime, args.prompt, stream=args.stream)
@@ -482,6 +503,16 @@ def main() -> None:
             continue
         if item_type == "command" and user_input == "/replay":
             print(runtime.replay_session())
+            continue
+        if item_type == "command" and user_input == "/skills":
+            print(runtime.list_skills())
+            continue
+        if item_type == "command" and user_input.startswith("/skill "):
+            parts = shlex.split(user_input)
+            if len(parts) == 2:
+                print(runtime.load_skill(parts[1]))
+                continue
+            print("Usage: /skill <name>")
             continue
         if item_type == "command" and user_input == "/snapshots":
             print(runtime.list_snapshots())

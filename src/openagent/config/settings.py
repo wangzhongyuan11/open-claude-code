@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -23,6 +23,7 @@ class Settings:
     yolo_mode: bool = False
     snapshot_enabled: bool = True
     lsp_enabled: bool = True
+    skill_paths: list[str] = field(default_factory=list)
 
     @classmethod
     def from_workspace(cls, workspace: str | Path) -> "Settings":
@@ -45,6 +46,7 @@ class Settings:
         yolo_mode = os.getenv("OPENAGENT_YOLO", "false").lower() in {"1", "true", "yes", "on"}
         snapshot_enabled = os.getenv("OPENAGENT_SNAPSHOT", "true").lower() in {"1", "true", "yes", "on"}
         lsp_enabled = os.getenv("OPENAGENT_LSP", "true").lower() in {"1", "true", "yes", "on"}
+        skill_paths = [item for item in os.getenv("OPENAGENT_SKILL_PATHS", "").split(os.pathsep) if item]
         return cls(
             workspace=workspace_path,
             session_root=state_root / "sessions",
@@ -62,4 +64,5 @@ class Settings:
             yolo_mode=yolo_mode,
             snapshot_enabled=snapshot_enabled,
             lsp_enabled=lsp_enabled,
+            skill_paths=skill_paths,
         )

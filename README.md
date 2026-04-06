@@ -26,6 +26,7 @@ src/openagent/
   extensions/  permission and future integration hooks
   providers/   anthropic / volcengine
   session/     session store, manager, processor, prompt, compaction, summary
+  skill/       OpenCode-style SKILL.md discovery, validation, and loading
   tools/       registry and builtin tools
 ```
 
@@ -89,6 +90,10 @@ The main runtime state flows are:
   - `tools/registry.py`
   - `permission/policy.py`
   - `tools/truncation.py`
+- skill discovery / lazy injection
+  - `skill/manager.py`
+  - `tools/builtin/integration.py`
+  - `agent/runtime.py`
 
 ## Run
 
@@ -152,6 +157,8 @@ openagent --workspace . --session-id <session_id> --status
 openagent --workspace . --session-id <session_id> --summary
 openagent --workspace . --session-id <session_id> --inspect
 openagent --workspace . --session-id <session_id> --replay
+openagent --workspace . --skills
+openagent --workspace . --skill openai-docs
 openagent --workspace . --prompt "创建一个 demo.txt"
 openagent --workspace . --stream --prompt "请只回复 stream-ok。"
 ```
@@ -166,6 +173,8 @@ Interactive commands:
 - `/summary`
 - `/inspect`
 - `/replay`
+- `/skills`
+- `/skill <name>`
 - `/snapshots`
 - `/yolo`
 - `/yolo on`
@@ -219,6 +228,10 @@ Interactive command reference:
   - prints a structured JSON view of recent messages, parts, and metadata
 - `/replay`
   - prints a human-readable turn-by-turn replay
+- `/skills`
+  - lists discovered skills that are visible to the current agent after `permission.skill` filtering
+- `/skill <name>`
+  - loads one skill through the unified `skill` tool and prints the injected instruction block
 - `/snapshots`
   - lists persisted git-backed snapshots for the current session, including snapshot tree hashes, tool call ids, and changed files
 - `/yolo`
@@ -263,6 +276,99 @@ Interactive command reference:
   - discards the current multiline input buffer before submission
 - `/exit`
   - exits the REPL
+
+## Skill Runtime
+
+OpenAgent implements an OpenCode-style native skill system. Skills are reusable instruction packages discovered from `SKILL.md` files, advertised to the model by name/description, and loaded lazily through one unified `skill` tool only when the task matches the description.
+
+Full rules are documented in [SKILLS.md](SKILLS.md).
+
+Core implementation:
+
+- `skill/models.py`
+  - `SkillInfo`, `LoadedSkill`, and structured discovery errors
+- `skill/manager.py`
+  - scans skill roots, parses frontmatter, validates names and required fields, resolves duplicates, and loads skill bodies plus bundled files
+- `tools/builtin/integration.py`
+  - exposes the unified `skill` tool with `action=list` and `name=<skill>`
+- `agent/runtime.py`
+  - injects available skill summaries into the system prompt and provides `--skills`, `--skill`, `/skills`, and `/skill <name>`
+- `permission/policy.py`
+  - evaluates `permission="skill"` with the skill name as the pattern, so agents can allow or deny individual skills using the same rule engine as tools
+
+Discovery rules:
+
+- Project-level OpenCode format:
+  - `.opencode/skill/**/SKILL.md`
+  - `.opencode/skills/**/SKILL.md`
+- Project-level compatible formats:
+  - `.claude/skills/**/SKILL.md`
+  - `.agents/skills/**/SKILL.md`
+- Global compatible formats:
+  - `~/.config/opencode/skill/**/SKILL.md`
+  - `~/.config/opencode/skills/**/SKILL.md`
+  - `~/.opencode/skill/**/SKILL.md`
+  - `~/.opencode/skills/**/SKILL.md`
+  - `~/.claude/skills/**/SKILL.md`
+  - `~/.agents/skills/**/SKILL.md`
+  - `~/.codex/skills/**/SKILL.md`
+- Additional roots:
+  - `OPENAGENT_SKILL_PATHS=/path/a:/path/b`
+
+Minimal `SKILL.md`:
+
+```markdown
+---
+name: python-review
+description: Use when reviewing Python code for bugs, tests, typing, and maintainability risks.
+compatibility: [openagent]
+license: MIT
+metadata:
+  short-description: Python review workflow
+---
+
+# Python Review
+
+Load this skill only for Python code review tasks. Read referenced files from this skill directory only when needed.
+```
+
+Skill rules and constraints:
+
+- `name` is required and must match `^[a-z0-9][a-z0-9._-]{0,63}$`.
+- Valid names: `python-review`, `openai-docs`, `skill_creator`, `docs.v1`.
+- Invalid names: `PythonReview`, `bad skill`, `-leading-dash`, empty names, names longer than 64 characters.
+- `description` is required and should state when to use the skill. It is the main matching signal exposed to the agent before loading the body.
+- `compatibility`, `license`, and `metadata` are optional. `metadata` is preserved as structured data; unsupported fields are ignored rather than treated as runtime instructions.
+- The Markdown body is required. Keep it focused on procedures, constraints, and references. Put large reference material in `references/`, scripts in `scripts/`, and templates/assets in `assets/`; the `skill` tool reports bundled files so the agent can load only what it needs.
+- Duplicate skill names are allowed but reported as discovery errors; the later discovered skill replaces the earlier one.
+- Invalid frontmatter, missing `name`/`description`, invalid names, empty bodies, path errors, and permission denials are reported in CLI/tool output instead of being silently ignored.
+
+Permission behavior:
+
+- Skills use a first-class `permission.skill` namespace.
+- The permission pattern is the skill name, so `openai-*` or `skill-*` style wildcard rules can be represented by the existing permission rule engine.
+- Denied skills are hidden from `/skills`, omitted from prompt skill summaries, and blocked by the `skill` tool.
+- YOLO mode auto-approves ask-class permissions, but explicit `deny` rules still apply.
+- The design leaves space for future per-agent skill filtering because skill visibility is evaluated against the active agent profile at prompt/tool time.
+
+CLI checks:
+
+```bash
+openagent --skills
+openagent --skill openai-docs
+OPENAGENT_SKILL_PATHS=/tmp/my-skills openagent --skills
+```
+
+The current repository has been validated against existing global skills:
+
+- `ljg-travel`
+  - general workflow skill for cultural travel research
+- `openai-docs`
+  - OpenAI/OpenCode-related documentation workflow skill
+- `skill-creator`
+  - skill authoring and rules example
+- `skill-installer`
+  - installation workflow example
 
 ## Minimal Demo
 

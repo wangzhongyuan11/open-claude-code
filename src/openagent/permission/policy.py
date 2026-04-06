@@ -189,8 +189,6 @@ class SessionPermissionPolicy(PermissionPolicy):
         return [PermissionRule.from_dict(item) for item in rules if isinstance(item, dict)]
 
     def _default_rules_for_agent(self, profile: AgentProfile) -> list[PermissionRule]:
-        if profile.permission_rules:
-            return list(profile.permission_rules)
         readonly = _is_readonly_profile(profile)
         rules: list[PermissionRule] = []
         if readonly:
@@ -202,6 +200,8 @@ class SessionPermissionPolicy(PermissionPolicy):
                 rules.append(PermissionRule(agent=profile.name, permission=f"tool.{tool}", pattern="*", action="ask", source="agent-readonly"))
             for tool in READ_ONLY_TOOLS:
                 rules.append(PermissionRule(agent=profile.name, permission=f"tool.{tool}", pattern="*", action="allow", source="agent-default"))
+            rules.append(PermissionRule(agent=profile.name, permission="skill", pattern="*", action="allow", source="agent-default"))
+            rules.extend(profile.permission_rules)
             return rules
 
         for tool in READ_ONLY_TOOLS | DELEGATE_TOOLS:
@@ -209,11 +209,15 @@ class SessionPermissionPolicy(PermissionPolicy):
         for tool in WRITE_TOOLS | SHELL_TOOLS | NETWORK_TOOLS:
             rules.append(PermissionRule(agent=profile.name, permission=f"tool.{tool}", pattern="*", action="ask", source="agent-default"))
         rules.append(PermissionRule(agent=profile.name, permission="tool.batch", pattern="*", action="ask", source="agent-default"))
+        rules.append(PermissionRule(agent=profile.name, permission="skill", pattern="*", action="allow", source="agent-default"))
+        rules.extend(profile.permission_rules)
         return rules
 
     def _describe(self, context: ExtensionContext) -> PermissionContextDescriptor:
         name = context.tool_name
         arguments = context.arguments
+        if name == "skill":
+            return PermissionContextDescriptor(permission="skill", pattern=str(arguments.get("name") or "*"), metadata={"kind": "skill"})
         if name in READ_ONLY_TOOLS:
             return PermissionContextDescriptor(permission=f"tool.{name}", pattern=_path_pattern(arguments, context.tool_context.workspace), metadata={"kind": "read"})
         if name in WRITE_TOOLS:
@@ -244,6 +248,14 @@ class SessionPermissionPolicy(PermissionPolicy):
             return False
         target = descriptor.metadata.get("target_agent", "general")
         return str(target) not in {"plan", "explore"}
+
+    def allows_skill(self, session_id: str, skill_name: str) -> bool:
+        rulesets = [
+            self._default_rules_for_agent(self.agent_profile),
+            self._persisted_rules(session_id),
+        ]
+        resolved = evaluate_rules(self.agent_profile.name, "skill", skill_name, rulesets)
+        return resolved.action != "deny"
 
     def _append_permission_message(self, session_id: str, *, content: str, state: str, payload: dict[str, Any]) -> None:
         def updater(session) -> None:

@@ -9,6 +9,7 @@ from typing import Any
 from openagent.domain.session import SessionTodo
 from openagent.domain.tools import ToolArtifact, ToolContext, ToolExecutionResult
 from openagent.session.todo import render_todos
+from openagent.skill import SkillManager
 from openagent.tools.base import BaseTool
 from openagent.tools.builtin.search import _iter_workspace_files
 
@@ -57,40 +58,79 @@ class QuestionTool(BaseTool):
 class SkillTool(BaseTool):
     tool_id = "skill"
     name = "skill"
-    description = "Load a skill template from configured skill directories and inject its instructions into context."
+    description = "List or load an available skill. Use it when the task matches a skill description; the output injects that skill's instructions."
     input_schema = {
         "type": "object",
         "properties": {
+            "action": {"type": "string"},
             "name": {"type": "string"},
         },
-        "required": ["name"],
+        "required": [],
     }
 
     def invoke(self, arguments: dict, context: ToolContext) -> ToolExecutionResult:
-        skill_name = arguments["name"]
-        roots = [Path(root) for root in context.runtime_state.get("skill_roots", [])]
-        skill_path = _find_skill_path(skill_name, roots)
-        if skill_path is None:
-            available = ", ".join(sorted(_list_available_skills(roots))) or "none"
+        manager = context.runtime_state.get("skill_manager")
+        if not isinstance(manager, SkillManager):
+            roots = [str(root) for root in context.runtime_state.get("skill_roots", [])]
+            manager = SkillManager(context.workspace, extra_paths=roots)
+        action = str(arguments.get("action") or ("load" if arguments.get("name") else "list"))
+        if action in {"list", "available"}:
+            result = manager.discover()
+            allowed = context.runtime_state.get("skill_allowed")
+            skills = [skill for skill in result.skills if not callable(allowed) or bool(allowed(skill.name))]
+            output = manager.format_available(verbose=True, skills=skills)
+            if result.errors:
+                output += "\n<skill_errors>\n"
+                output += "\n".join(json.dumps(item.to_dict(), ensure_ascii=False) for item in result.errors[:20])
+                output += "\n</skill_errors>"
+            return ToolExecutionResult.success(
+                output,
+                title=f"Listed {len(skills)} skill(s)",
+                metadata={
+                    "operation": "skill",
+                    "action": "list",
+                    "result_count": str(len(skills)),
+                    "denied_count": str(len(result.skills) - len(skills)),
+                    "error_count": str(len(result.errors)),
+                },
+            )
+        skill_name = str(arguments.get("name", "")).strip()
+        if not skill_name:
+            return ToolExecutionResult.failure(
+                "skill name is required for load action",
+                error_type="invalid_arguments",
+                hint="Call skill with {'action': 'list'} to see available skills, or provide {'name': '<skill-name>'}.",
+                metadata={"operation": "skill", "action": action},
+            )
+        loaded = manager.get(skill_name)
+        if loaded is None:
+            available = ", ".join(skill.name for skill in manager.list()) or "none"
             return ToolExecutionResult.failure(
                 f'skill "{skill_name}" not found',
                 error_type="skill_not_found",
                 hint=f"Available skills: {available}",
                 metadata={"operation": "skill", "skill_name": skill_name},
             )
-        content = skill_path.read_text(encoding="utf-8").strip()
-        base_dir = str(skill_path.parent)
-        sample_files = sorted(str(path.relative_to(skill_path.parent)) for path in skill_path.parent.rglob("*") if path.is_file() and path.name != "SKILL.md")[:10]
+        allowed = context.runtime_state.get("skill_allowed")
+        if callable(allowed) and not bool(allowed(skill_name)):
+            return ToolExecutionResult.failure(
+                f'skill "{skill_name}" is denied for the current agent',
+                error_type="permission_denied",
+                hint="Switch agent or update permission.skill rules if this skill should be available.",
+                metadata={"operation": "skill", "action": "load", "skill_name": skill_name},
+            )
+        base_dir = loaded.info.base_dir
         output = "\n".join(
             [
                 f'<skill_content name="{skill_name}">',
                 f"# Skill: {skill_name}",
                 "",
-                content,
+                loaded.content,
                 "",
                 f"Base directory for this skill: {base_dir}",
+                "Relative paths in this skill (e.g., scripts/, references/, templates/) are relative to this base directory.",
                 "<skill_files>",
-                *sample_files,
+                *loaded.files,
                 "</skill_files>",
                 "</skill_content>",
             ]
@@ -98,8 +138,15 @@ class SkillTool(BaseTool):
         return ToolExecutionResult.success(
             output,
             title=f"Loaded skill: {skill_name}",
-            metadata={"operation": "skill", "skill_name": skill_name, "dir": base_dir},
-            artifacts=[ToolArtifact(kind="file", path=str(skill_path), description="Loaded SKILL.md")],
+            metadata={
+                "operation": "skill",
+                "action": "load",
+                "skill_name": skill_name,
+                "dir": base_dir,
+                "source": loaded.info.source,
+                "scope": loaded.info.scope,
+            },
+            artifacts=[ToolArtifact(kind="file", path=loaded.info.location, description="Loaded SKILL.md")],
         )
 
 
