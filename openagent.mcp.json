@@ -18,6 +18,18 @@
       "command": "mcp-server-everything",
       "enabled": true,
       "timeout": 30
+    },
+    "memory": {
+      "type": "stdio",
+      "command": "mcp-server-memory",
+      "enabled": true,
+      "timeout": 30
+    },
+    "sequential-thinking": {
+      "type": "stdio",
+      "command": "mcp-server-sequential-thinking",
+      "enabled": true,
+      "timeout": 30
     }
   }
 }

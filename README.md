@@ -359,11 +359,15 @@ The repository includes `openagent.mcp.json` configured for:
   - `mcp-git`, development/tooling validation
 - `everything`
   - `@modelcontextprotocol/server-everything`, general MCP capability validation
+- `memory`
+  - `@modelcontextprotocol/server-memory`, knowledge graph memory for concrete cross-step state tasks
+- `sequential-thinking`
+  - `@modelcontextprotocol/server-sequential-thinking`, structured multi-step planning for workflow tasks
 
 Install the validation servers when needed:
 
 ```bash
-npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-everything mcp-git
+npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-everything mcp-git @modelcontextprotocol/server-memory @modelcontextprotocol/server-sequential-thinking
 ```
 
 CLI checks:
@@ -375,6 +379,8 @@ openagent --mcp-resources
 openagent --mcp-prompts
 openagent --yolo --mcp-call git git_status '{"repo_path":"/root/open-claude-code"}'
 openagent --yolo --mcp-call filesystem list_directory '{"path":"/root/open-claude-code/work"}'
+openagent --yolo --mcp-call memory create_entities '{"entities":[{"name":"openagent-mcp-demo","entityType":"project_fact","observations":["MCP memory stores validation facts."]}]}'
+openagent --yolo --mcp-call sequential-thinking sequentialthinking '{"thought":"Plan the MCP validation in one step.","nextThoughtNeeded":false,"thoughtNumber":1,"totalThoughts":1}'
 ```
 
 Agent-loop check:
@@ -388,6 +394,20 @@ Expected evidence in `/replay`:
 ```text
 ToolRequest: mcp__filesystem__list_directory {"path": "/root/open-claude-code/work"}
 ToolResult: mcp__filesystem__list_directory -> ...
+```
+
+Concrete multi-tool MCP task:
+
+```text
+请完成一个 MCP 综合验证任务：1. 使用 MCP sequential-thinking 做一步简短计划，2. 使用 MCP memory 写入实体 openagent-cli-mcp-final，观察内容为 CLI loop used MCP memory and sequential-thinking，3. 再用 MCP memory 搜索该实体，最后只回复是否搜索到了该实体。
+```
+
+Expected `/replay` evidence:
+
+```text
+ToolRequest: mcp__sequential_thinking__sequentialthinking ...
+ToolRequest: mcp__memory__create_entities ...
+ToolRequest: mcp__memory__search_nodes ...
 ```
 
 Current limits:
