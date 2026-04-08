@@ -24,6 +24,16 @@ def test_cli_parser_accepts_prompt_and_print_session():
             "--mcp-tools",
             "--mcp-resources",
             "--mcp-prompts",
+            "--mcp-inspect",
+            "everything",
+            "--mcp-reconnect",
+            "everything",
+            "--mcp-ping",
+            "everything",
+            "--mcp-auth",
+            "everything",
+            '{"access_token":"secret"}',
+            "--mcp-trace",
             "--mcp-call",
             "everything",
             "echo",
@@ -50,6 +60,11 @@ def test_cli_parser_accepts_prompt_and_print_session():
     assert args.mcp_tools is True
     assert args.mcp_resources is True
     assert args.mcp_prompts is True
+    assert args.mcp_inspect == "everything"
+    assert args.mcp_reconnect == "everything"
+    assert args.mcp_ping == "everything"
+    assert args.mcp_auth == ["everything", '{"access_token":"secret"}']
+    assert args.mcp_trace is True
     assert args.mcp_call == ["everything", "echo", '{"message":"ok"}']
     assert args.mcp_resource == ["everything", "demo://resource/static/document/architecture.md"]
     assert args.mcp_prompt == ["everything", "simple-prompt", "{}"]
@@ -119,6 +134,14 @@ def test_repl_reader_treats_skill_commands_as_commands():
 def test_repl_reader_treats_mcp_commands_as_commands():
     assert _classify_repl_text("/mcp") == ("command", "/mcp")
     assert _classify_repl_text("/mcp tools") == ("command", "/mcp tools")
+    assert _classify_repl_text("/mcp inspect everything") == ("command", "/mcp inspect everything")
+    assert _classify_repl_text("/mcp reconnect everything") == ("command", "/mcp reconnect everything")
+    assert _classify_repl_text("/mcp ping everything") == ("command", "/mcp ping everything")
+    assert _classify_repl_text('/mcp auth everything {"access_token":"ok"}') == (
+        "command",
+        '/mcp auth everything {"access_token":"ok"}',
+    )
+    assert _classify_repl_text("/mcp trace") == ("command", "/mcp trace")
     assert _classify_repl_text('/mcp call everything echo {"message":"ok"}') == (
         "command",
         '/mcp call everything echo {"message":"ok"}',

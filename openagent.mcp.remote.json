@@ -1,0 +1,32 @@
+{
+  "mcpServers": {
+    "remote-memory": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8811/mcp",
+      "headers": {
+        "X-API-Key": "remote-demo"
+      },
+      "enabled": true,
+      "timeout": 30
+    },
+    "remote-sequential": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8812/mcp",
+      "enabled": true,
+      "timeout": 30
+    },
+    "remote-filesystem-sse": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8813/mcp",
+      "enabled": true,
+      "timeout": 30
+    },
+    "remote-memory-oauth": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8814/mcp",
+      "oauth": {},
+      "enabled": true,
+      "timeout": 30
+    }
+  }
+}

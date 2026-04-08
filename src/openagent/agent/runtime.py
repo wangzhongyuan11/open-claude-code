@@ -398,10 +398,41 @@ class AgentRuntime:
             return json.dumps({"enabled": False, "prompts": {}}, ensure_ascii=False, indent=2)
         return json.dumps({"enabled": True, "prompts": self.mcp_manager.list_prompts()}, ensure_ascii=False, indent=2)
 
+    def mcp_inspect(self, server: str) -> str:
+        if self.mcp_manager is None:
+            return json.dumps({"enabled": False}, ensure_ascii=False, indent=2)
+        return json.dumps(self.mcp_manager.inspect(server), ensure_ascii=False, indent=2)
+
+    def mcp_reconnect(self, server: str) -> str:
+        if self.mcp_manager is None:
+            return "MCP is disabled."
+        state = self.mcp_manager.reconnect(server)
+        self._reload_runtime_registry()
+        return json.dumps(state.to_dict(), ensure_ascii=False, indent=2)
+
+    def mcp_ping(self, server: str) -> str:
+        if self.mcp_manager is None:
+            return json.dumps({"enabled": False}, ensure_ascii=False, indent=2)
+        return json.dumps(self.mcp_manager.ping(server), ensure_ascii=False, indent=2)
+
+    def mcp_auth(self, server: str, payload: dict[str, Any] | None = None) -> str:
+        if self.mcp_manager is None:
+            return json.dumps({"enabled": False}, ensure_ascii=False, indent=2)
+        result = self.mcp_manager.set_auth(server, payload)
+        self._reload_runtime_registry()
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    def mcp_trace_report(self) -> str:
+        if self.mcp_manager is None:
+            return json.dumps({"enabled": False}, ensure_ascii=False, indent=2)
+        return json.dumps(self.mcp_manager.trace(), ensure_ascii=False, indent=2)
+
     def mcp_call(self, server: str, tool: str, arguments: dict[str, Any]) -> str:
         if self.mcp_manager is None:
             return "MCP is disabled."
         tool_id = f"mcp__{self._safe_mcp_name(server)}__{self._safe_mcp_name(tool)}"
+        if tool_id not in self.registry.ids(self.loop.tool_context):
+            self._reload_runtime_registry()
         context = self.loop.tool_context.child(metadata={"tool_name": tool_id})
         return self.registry.invoke(tool_id, arguments, context).content
 
@@ -529,6 +560,22 @@ class AgentRuntime:
             event_bus=self.event_bus,
             session_id_factory=lambda: self.session.id,
             runtime_state_factory=self._tool_runtime_state,
+        )
+
+    def _reload_runtime_registry(self) -> None:
+        self.registry = self._build_registry_for_profile(self.agent_profile)
+        self.loop = AgentLoop(
+            provider=self.provider,
+            tool_registry=self.registry,
+            tool_context=ToolContext(
+                workspace=self.workspace,
+                session_id=self.session.id,
+                agent_name=self.agent_profile.name,
+                event_bus=self.event_bus,
+                runtime_state=self._tool_runtime_state(self.agent_profile.name),
+                permission=dict(self.session.permission),
+            ),
+            event_bus=self.event_bus,
         )
 
     def _build_registry(self, profile: AgentProfile | None = None) -> ToolRegistry:

@@ -56,7 +56,11 @@ class ToolRegistry:
         try:
             registration = self._registrations[tool_id]
         except KeyError as exc:
-            raise KeyError(f"unknown tool: {tool_id}") from exc
+            normalized = _normalize_mcp_tool_id(tool_id)
+            if normalized != tool_id and normalized in self._registrations:
+                registration = self._registrations[normalized]
+            else:
+                raise KeyError(f"unknown tool: {tool_id}") from exc
         return registration.factory()
 
     def ids(self, context: ToolContext | None = None) -> list[str]:
@@ -254,3 +258,17 @@ class ToolRegistry:
                 "has_error": result.is_error,
             },
         )
+
+
+def _normalize_mcp_tool_id(tool_id: str) -> str:
+    if not tool_id.startswith("mcp__"):
+        return tool_id
+    parts = tool_id.split("__")
+    if len(parts) < 3:
+        return tool_id
+    normalized = [parts[0]]
+    for item in parts[1:]:
+        safe = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in item.strip())
+        safe = "_".join(part for part in safe.split("_") if part)
+        normalized.append(safe or item)
+    return "__".join(normalized)

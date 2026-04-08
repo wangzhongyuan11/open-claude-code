@@ -58,6 +58,11 @@ HELP_TEXT = """Available interactive commands:
 /mcp tools                List MCP tools exposed through the tool registry
 /mcp resources            List MCP resources by server
 /mcp prompts              List MCP prompts by server
+/mcp inspect <server>     Show one MCP server's config, auth state, and discovery details
+/mcp reconnect <server>   Reconnect an MCP server and refresh tool injection
+/mcp ping <server>        Probe one MCP server and print connection status
+/mcp auth <server> [json] Store auth for one MCP server and reconnect it
+/mcp trace                Print MCP transport attempts and recent errors
 /mcp call <server> <tool> [json]  Call an MCP tool manually
 /mcp resource <server> <uri>      Read an MCP resource manually
 /mcp prompt <server> <name> [json] Get an MCP prompt manually
@@ -100,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mcp-tools", action="store_true", help="List MCP tools and exit")
     parser.add_argument("--mcp-resources", action="store_true", help="List MCP resources and exit")
     parser.add_argument("--mcp-prompts", action="store_true", help="List MCP prompts and exit")
+    parser.add_argument("--mcp-inspect", default=None, help="Inspect one MCP server and exit")
+    parser.add_argument("--mcp-reconnect", default=None, help="Reconnect one MCP server and exit")
+    parser.add_argument("--mcp-ping", default=None, help="Ping one MCP server and exit")
+    parser.add_argument("--mcp-auth", nargs="+", metavar=("SERVER", "JSON"), help="Store auth for one MCP server and reconnect it")
+    parser.add_argument("--mcp-trace", action="store_true", help="Print MCP transport attempts and exit")
     parser.add_argument("--mcp-call", nargs=3, metavar=("SERVER", "TOOL", "JSON"), help="Call an MCP tool and exit")
     parser.add_argument("--mcp-resource", nargs=2, metavar=("SERVER", "URI"), help="Read an MCP resource and exit")
     parser.add_argument("--mcp-prompt", nargs=3, metavar=("SERVER", "NAME", "JSON"), help="Get an MCP prompt and exit")
@@ -491,6 +501,28 @@ def main() -> None:
         print(runtime.mcp_prompts_report())
         return
 
+    if args.mcp_inspect:
+        print(runtime.mcp_inspect(args.mcp_inspect))
+        return
+
+    if args.mcp_reconnect:
+        print(runtime.mcp_reconnect(args.mcp_reconnect))
+        return
+
+    if args.mcp_ping:
+        print(runtime.mcp_ping(args.mcp_ping))
+        return
+
+    if args.mcp_auth:
+        server = args.mcp_auth[0]
+        payload = json.loads(" ".join(args.mcp_auth[1:])) if len(args.mcp_auth) > 1 else None
+        print(runtime.mcp_auth(server, payload))
+        return
+
+    if args.mcp_trace:
+        print(runtime.mcp_trace_report())
+        return
+
     if args.mcp_call:
         server, tool, raw_args = args.mcp_call
         print(runtime.mcp_call(server, tool, json.loads(raw_args)))
@@ -577,6 +609,25 @@ def main() -> None:
             if len(parts) == 2 and parts[1] == "prompts":
                 print(runtime.mcp_prompts_report())
                 continue
+            if len(parts) == 3 and parts[1] == "inspect":
+                print(runtime.mcp_inspect(parts[2]))
+                continue
+            if len(parts) == 3 and parts[1] == "reconnect":
+                print(runtime.mcp_reconnect(parts[2]))
+                continue
+            if len(parts) == 3 and parts[1] == "ping":
+                print(runtime.mcp_ping(parts[2]))
+                continue
+            if len(parts) >= 3 and parts[1] == "auth":
+                try:
+                    payload = json.loads(" ".join(parts[3:])) if len(parts) > 3 else None
+                    print(runtime.mcp_auth(parts[2], payload))
+                except Exception as exc:
+                    print(f"MCP auth failed: {exc}")
+                continue
+            if len(parts) == 2 and parts[1] == "trace":
+                print(runtime.mcp_trace_report())
+                continue
             if len(parts) >= 4 and parts[1] == "call":
                 try:
                     arguments = json.loads(" ".join(parts[4:])) if len(parts) > 4 else {}
@@ -597,7 +648,7 @@ def main() -> None:
                 except Exception as exc:
                     print(f"MCP prompt failed: {exc}")
                 continue
-            print("Usage: /mcp | /mcp tools | /mcp resources | /mcp prompts | /mcp call <server> <tool> [json] | /mcp resource <server> <uri> | /mcp prompt <server> <name> [json]")
+            print("Usage: /mcp | /mcp tools | /mcp resources | /mcp prompts | /mcp inspect <server> | /mcp reconnect <server> | /mcp ping <server> | /mcp auth <server> [json] | /mcp trace | /mcp call <server> <tool> [json] | /mcp resource <server> <uri> | /mcp prompt <server> <name> [json]")
             continue
         if item_type == "command" and user_input == "/snapshots":
             print(runtime.list_snapshots())

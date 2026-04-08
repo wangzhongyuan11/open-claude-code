@@ -318,9 +318,9 @@ Core implementation:
 - `mcp/models.py`
   - structured server config, server state, and discovered tool info
 - `mcp/client.py`
-  - stdio JSON-RPC client with initialize, capability listing, tool calls, resource reads, prompt fetches, timeout handling, and shutdown
+  - stdio JSON-RPC client plus remote StreamableHTTP/SSE client with auth prelude, fallback handling, timeout handling, and transport attempt traces
 - `mcp/manager.py`
-  - config discovery, server lifecycle, capability cache, multi-server isolation, status tracking, and reconnect-on-demand
+  - config discovery, auth storage, server lifecycle, capability cache, multi-server isolation, remote reconnect/ping/inspect, and reconnect-on-demand
 - `mcp/tool.py`
   - adapts MCP tools/resources/prompts into normal `BaseTool` implementations
 - `agent/runtime.py`
@@ -351,6 +351,25 @@ Example config:
 }
 ```
 
+Remote config is also supported:
+
+```json
+{
+  "mcpServers": {
+    "remote-memory": {
+      "type": "remote",
+      "url": "http://127.0.0.1:8811/mcp",
+      "headers": {
+        "X-API-Key": "remote-demo"
+      },
+      "oauth": false,
+      "enabled": true,
+      "timeout": 30
+    }
+  }
+}
+```
+
 The repository includes `openagent.mcp.json` configured for:
 
 - `filesystem`
@@ -364,10 +383,30 @@ The repository includes `openagent.mcp.json` configured for:
 - `sequential-thinking`
   - `@modelcontextprotocol/server-sequential-thinking`, structured multi-step planning for workflow tasks
 
+Remote validation config is provided separately in `openagent.mcp.remote.json` so local development does not fail when remote proxies are not running. It contains:
+
+- `remote-memory`
+  - StreamableHTTP with `X-API-Key: remote-demo`
+- `remote-sequential`
+  - StreamableHTTP planning server
+- `remote-filesystem-sse`
+  - SSE-only filesystem server used to prove HTTP-first fallback
+- `remote-memory-oauth`
+  - auth-required remote memory server used to validate `needs_auth` and reconnect after storing credentials
+
 Install the validation servers when needed:
 
 ```bash
-npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-everything mcp-git @modelcontextprotocol/server-memory @modelcontextprotocol/server-sequential-thinking
+npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-everything mcp-git @modelcontextprotocol/server-memory @modelcontextprotocol/server-sequential-thinking mcp-proxy
+```
+
+Start remote validation proxies when you want to test remote MCP:
+
+```bash
+mcp-proxy --host 127.0.0.1 --port 8811 --apiKey remote-demo -- mcp-server-memory
+mcp-proxy --host 127.0.0.1 --port 8812 -- mcp-server-sequential-thinking
+mcp-proxy --host 127.0.0.1 --port 8813 --server sse -- mcp-server-filesystem /root/open-claude-code/work
+mcp-proxy --host 127.0.0.1 --port 8814 --apiKey oauth-demo -- mcp-server-memory
 ```
 
 CLI checks:
@@ -377,10 +416,25 @@ openagent --mcp
 openagent --mcp-tools
 openagent --mcp-resources
 openagent --mcp-prompts
+openagent --mcp-inspect filesystem
+openagent --mcp-ping filesystem
+openagent --mcp-trace
 openagent --yolo --mcp-call git git_status '{"repo_path":"/root/open-claude-code"}'
 openagent --yolo --mcp-call filesystem list_directory '{"path":"/root/open-claude-code/work"}'
 openagent --yolo --mcp-call memory create_entities '{"entities":[{"name":"openagent-mcp-demo","entityType":"project_fact","observations":["MCP memory stores validation facts."]}]}'
 openagent --yolo --mcp-call sequential-thinking sequentialthinking '{"thought":"Plan the MCP validation in one step.","nextThoughtNeeded":false,"thoughtNumber":1,"totalThoughts":1}'
+```
+
+Remote CLI checks:
+
+```bash
+OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --mcp
+OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --mcp-inspect remote-filesystem-sse
+OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --mcp-trace
+OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --yolo --mcp-call remote-memory create_entities '{"entities":[{"name":"openagent-remote-demo","entityType":"project_fact","observations":["Created through remote MCP."]}]}'
+OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --yolo --mcp-call remote-filesystem-sse list_directory '{"path":"/root/open-claude-code/work"}'
+OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --mcp-ping remote-memory-oauth
+OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --mcp-auth remote-memory-oauth '{"access_token":"oauth-demo","header_name":"X-API-Key","prefix":""}'
 ```
 
 Agent-loop check:
@@ -410,9 +464,41 @@ ToolRequest: mcp__memory__create_entities ...
 ToolRequest: mcp__memory__search_nodes ...
 ```
 
+Remote multi-server validation used in a persisted session:
+
+```text
+请完成一个远程 MCP 综合验证任务：1. 使用 remote-sequential 做一步简短计划，2. 使用 remote-memory 写入实体 remote-loop-b，观察内容为 remote multi server validation，3. 再搜索 remote-loop-b，最后只回复是否搜索到了该实体。
+```
+
+Observed `/replay` evidence:
+
+```text
+ToolRequest: mcp__remote_sequential__sequentialthinking ...
+ToolRequest: mcp__remote_memory__create_entities ...
+ToolRequest: mcp__remote_memory__search_nodes ...
+```
+
+Failure-recovery validation used in a persisted session:
+
+```text
+1. 先用 remote-filesystem-sse 列出 /root/open-claude-code/work/not-real。
+2. 如果失败，用一句话说明原因。
+3. 再列出 /root/open-claude-code/work。
+4. 最后只回复是否看到了 yolo_ok.txt。
+```
+
+Observed result:
+
+```text
+看到了 yolo_ok.txt。
+```
+
 Current limits:
 
-- `stdio` MCP transport is implemented and verified. HTTP/SSE/OAuth transports are recognized as config types but reported as unsupported.
+- `stdio` MCP transport is implemented and verified.
+- Remote `StreamableHTTP` transport is implemented and verified.
+- Remote `SSE` fallback is implemented and verified.
+- Auth is partially implemented: stored token/header credentials, `needs_auth`, and `needs_client_registration` are implemented; a full browser OAuth callback flow is not.
 - resource and prompt capabilities are listed and callable through generic tools; some third-party servers may time out or return errors for specific resource URIs, and those failures are surfaced rather than hidden.
 - MCP permission policy currently uses normal tool names such as `mcp__everything__echo`; dedicated `permission.mcp` namespacing can be added later if needed.
 
