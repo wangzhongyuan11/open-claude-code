@@ -394,6 +394,24 @@ Remote validation config is provided separately in `openagent.mcp.remote.json` s
 - `remote-memory-oauth`
   - auth-required remote memory server used to validate `needs_auth` and reconnect after storing credentials
 
+Optional local GitHub MCP configuration can be added in an ignored file such as `.openagent/mcp.github.json` and enabled through `OPENAGENT_MCP_CONFIG`. Example:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "mcp-server-github",
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${YOUR_TOKEN}"
+      },
+      "enabled": true,
+      "timeout": 60
+    }
+  }
+}
+```
+
 Install the validation servers when needed:
 
 ```bash
@@ -435,6 +453,15 @@ OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --yolo --mcp-call remot
 OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --yolo --mcp-call remote-filesystem-sse list_directory '{"path":"/root/open-claude-code/work"}'
 OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --mcp-ping remote-memory-oauth
 OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --mcp-auth remote-memory-oauth '{"access_token":"oauth-demo","header_name":"X-API-Key","prefix":""}'
+```
+
+GitHub MCP local checks:
+
+```bash
+npm install -g @modelcontextprotocol/server-github
+OPENAGENT_MCP_CONFIG="openagent.mcp.json:.openagent/mcp.github.json" openagent --mcp-inspect github
+OPENAGENT_MCP_CONFIG="openagent.mcp.json:.openagent/mcp.github.json" openagent --yolo --mcp-call github search_repositories '{"query":"openagent","perPage":3}'
+OPENAGENT_MCP_CONFIG="openagent.mcp.json:.openagent/mcp.github.json" openagent --yolo --mcp-call github get_file_contents '{"owner":"modelcontextprotocol","repo":"servers","path":"README.md"}'
 ```
 
 Agent-loop check:

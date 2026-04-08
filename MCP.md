@@ -187,11 +187,30 @@ The repository also includes [`openagent.mcp.remote.json`](openagent.mcp.remote.
   - remote auth-required server
   - purpose: validate `needs_auth`, stored credentials, and reconnect flow
 
+An optional local GitHub MCP server can also be attached through an ignored file such as `.openagent/mcp.github.json`:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "type": "stdio",
+      "command": "mcp-server-github",
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${YOUR_TOKEN}"
+      },
+      "enabled": true,
+      "timeout": 60
+    }
+  }
+}
+```
+
 Install them with:
 
 ```bash
 npm install -g @modelcontextprotocol/server-filesystem @modelcontextprotocol/server-everything mcp-git @modelcontextprotocol/server-memory @modelcontextprotocol/server-sequential-thinking
 npm install -g mcp-proxy
+npm install -g @modelcontextprotocol/server-github
 ```
 
 Start local remote validation proxies:
@@ -243,6 +262,14 @@ Auth prelude validation:
 OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --mcp-ping remote-memory-oauth
 OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --mcp-auth remote-memory-oauth '{"access_token":"oauth-demo","header_name":"X-API-Key","prefix":""}'
 OPENAGENT_MCP_CONFIG=openagent.mcp.remote.json openagent --yolo --mcp-call remote-memory-oauth search_nodes '{"query":"openagent-remote-demo"}'
+```
+
+GitHub MCP validation:
+
+```bash
+OPENAGENT_MCP_CONFIG="openagent.mcp.json:.openagent/mcp.github.json" openagent --mcp-inspect github
+OPENAGENT_MCP_CONFIG="openagent.mcp.json:.openagent/mcp.github.json" openagent --yolo --mcp-call github search_repositories '{"query":"openagent","perPage":3}'
+OPENAGENT_MCP_CONFIG="openagent.mcp.json:.openagent/mcp.github.json" openagent --yolo --mcp-call github get_file_contents '{"owner":"modelcontextprotocol","repo":"servers","path":"README.md"}'
 ```
 
 Agent-loop validation:
