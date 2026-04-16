@@ -11,6 +11,8 @@ from openagent.providers.base import BaseProvider
 
 
 class VolcengineProvider(BaseProvider):
+    DEFAULT_BASE_URL = "https://ark.cn-beijing.volces.com/api/coding/v3"
+
     def __init__(
         self,
         model: str,
@@ -22,7 +24,7 @@ class VolcengineProvider(BaseProvider):
         self.api_key = api_key or os.getenv("ARK_API_KEY") or os.getenv("VOLCENGINE_ARK_API_KEY")
         self.base_url = (
             (base_url or os.getenv("ARK_BASE_URL") or os.getenv("OPENAGENT_BASE_URL"))
-            or "https://operator.las.cn-beijing.volces.com/api/v1"
+            or self.DEFAULT_BASE_URL
         ).rstrip("/")
         self.timeout_seconds = timeout_seconds
         if not self.api_key:

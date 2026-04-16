@@ -75,7 +75,7 @@ def test_volcengine_provider_posts_expected_payload(monkeypatch):
     provider = VolcengineProvider(
         model="ep-test",
         api_key="secret",
-        base_url="https://operator.las.cn-beijing.volces.com/api/v1",
+        base_url="https://ark.cn-beijing.volces.com/api/coding/v3",
     )
     response = provider.generate(
         messages=[Message(role="user", content="hello")],
@@ -100,7 +100,7 @@ def test_volcengine_provider_stream_generate_parses_text_and_tool_calls(monkeypa
     provider = VolcengineProvider(
         model="ep-test",
         api_key="secret",
-        base_url="https://operator.las.cn-beijing.volces.com/api/v1",
+        base_url="https://ark.cn-beijing.volces.com/api/coding/v3",
     )
 
     def fake_stream(path, payload):
@@ -182,7 +182,7 @@ def test_volcengine_provider_stream_generate_parses_reasoning_deltas(monkeypatch
     provider = VolcengineProvider(
         model="ep-test",
         api_key="secret",
-        base_url="https://operator.las.cn-beijing.volces.com/api/v1",
+        base_url="https://ark.cn-beijing.volces.com/api/coding/v3",
     )
 
     def fake_stream(path, payload):
@@ -250,7 +250,7 @@ def test_volcengine_provider_post_stream_json_parses_sse(monkeypatch):
     provider = VolcengineProvider(
         model="ep-test",
         api_key="secret",
-        base_url="https://operator.las.cn-beijing.volces.com/api/v1",
+        base_url="https://ark.cn-beijing.volces.com/api/coding/v3",
     )
 
     chunks = list(provider._post_stream_json("/chat/completions", {"stream": True}))

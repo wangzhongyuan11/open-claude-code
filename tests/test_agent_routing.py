@@ -21,3 +21,9 @@ def test_readonly_custom_agent_routes_exploration_to_explore():
     decision = decide_routing(reviewer, "请定位 active_agent 的使用位置，并只返回函数名")
     assert decision.action == "delegate"
     assert decision.target_agent == "explore"
+
+
+def test_build_does_not_delegate_github_mcp_search_requests():
+    decision = decide_routing(AgentProfile(name="build"), "请使用 GitHub MCP 搜索 query=openagent，并只回复第一项仓库的 full_name。")
+    assert decision.action == "stay"
+    assert decision.target_agent is None

@@ -18,6 +18,7 @@ def decide_routing(active: AgentProfile, user_text: str) -> RoutingDecision:
     planning_request = _looks_like_planning(lowered)
     build_request = _looks_like_build(lowered)
     explore_request = _looks_like_exploration(lowered)
+    mcp_or_github_request = _looks_like_mcp_or_github_request(lowered)
     readonly_agent = _is_readonly_agent(active)
 
     if active.name == "build" and planning_request:
@@ -26,7 +27,7 @@ def decide_routing(active: AgentProfile, user_text: str) -> RoutingDecision:
     if (active.name == "plan" or readonly_agent) and build_request:
         return RoutingDecision(action="switch", target_agent="build", reason="implementation-request")
 
-    if (active.name == "build" or readonly_agent) and explore_request and not build_request:
+    if (active.name == "build" or readonly_agent) and explore_request and not build_request and not mcp_or_github_request:
         return RoutingDecision(action="delegate", target_agent="explore", reason="exploration-request")
 
     return RoutingDecision()
@@ -95,6 +96,19 @@ def _looks_like_exploration(lowered: str) -> bool:
         "find references",
         "where is",
         "search",
+    ]
+    return any(token in lowered for token in tokens)
+
+
+def _looks_like_mcp_or_github_request(lowered: str) -> bool:
+    tokens = [
+        " mcp",
+        "mcp ",
+        "github",
+        "pull request",
+        "issue",
+        "repo:",
+        "repository",
     ]
     return any(token in lowered for token in tokens)
 

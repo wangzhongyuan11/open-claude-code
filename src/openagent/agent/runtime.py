@@ -755,7 +755,45 @@ class AgentRuntime:
         skills = self._skill_prompt_for(profile)
         if skills:
             prompt = prompt + "\n\n" + skills
+        mcp_context = self._mcp_prompt_for()
+        if mcp_context:
+            prompt = prompt + "\n\n" + mcp_context
         return build_system_prompt(self.session, prompt)
+
+    def _mcp_prompt_for(self) -> str:
+        if self.mcp_manager is None:
+            return ""
+        states = self.mcp_manager.list_states()
+        if not states:
+            return ""
+        connected = [state for state in states if state.status == "connected"]
+        lines = [
+            "MCP runtime:",
+            "- Treat the MCP status below as authoritative for this turn.",
+            "- If a connected MCP server matches the user's request, prefer its tools over web or bash for that domain.",
+            "- Do not claim that a GitHub/MCP server is unavailable unless it is absent from the connected list or marked failed below.",
+        ]
+        if connected:
+            summary = ", ".join(f"{state.name} ({state.tools} tools)" for state in connected)
+            lines.append(f"- connected_servers: {summary}")
+            tools_by_server: dict[str, list[str]] = {}
+            for info in self.mcp_manager.list_tools():
+                tools_by_server.setdefault(info.server, []).append(info.tool_id)
+            for state in connected:
+                tool_ids = tools_by_server.get(state.name, [])
+                preview = ", ".join(tool_ids[:6])
+                if len(tool_ids) > 6:
+                    preview += ", ..."
+                if preview:
+                    lines.append(f"- {state.name}_tool_examples: {preview}")
+            return "\n".join(lines)
+        summary = ", ".join(
+            f"{state.name}={state.status}" + (f" ({state.error})" if state.error else "")
+            for state in states
+        )
+        lines.append(f"- connected_servers: none")
+        lines.append(f"- configured_server_status: {summary}")
+        return "\n".join(lines)
 
     def _system_prompt_for_agent_name(self, agent_name: str) -> str:
         profile = self.agent_registry.get(agent_name)

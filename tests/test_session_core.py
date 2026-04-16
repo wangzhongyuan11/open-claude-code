@@ -1,4 +1,6 @@
 from pathlib import Path
+import json
+import sys
 
 from openagent.agent.loop import AgentLoop
 from openagent.agent.runtime import AgentRuntime, build_default_runtime
@@ -37,6 +39,26 @@ def build_runtime(tmp_path: Path, compact_max_messages: int = 4) -> AgentRuntime
         session_manager=manager,
         session=session,
         settings=settings,
+    )
+
+
+def _write_fake_mcp_config(tmp_path: Path) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "mcp" / "fake_mcp_server.py"
+    (tmp_path / "openagent.mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "fake": {
+                        "type": "stdio",
+                        "command": sys.executable,
+                        "args": [str(fixture)],
+                        "enabled": True,
+                        "timeout": 5,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
     )
 
 
@@ -163,6 +185,31 @@ def test_prompt_window_trims_large_tool_outputs(tmp_path: Path):
 
     assert any("prompt-window-trimmed:" in note for note in prompt.notes)
     assert prompt.estimated_tokens < 2000
+
+
+def test_system_prompt_includes_connected_mcp_context(tmp_path: Path):
+    _write_fake_mcp_config(tmp_path)
+    runtime = build_runtime(tmp_path)
+
+    prompt = runtime.system_prompt
+
+    assert "MCP runtime:" in prompt
+    assert "connected_servers: fake (1 tools)" in prompt
+    assert "mcp__fake__echo" in prompt
+
+
+def test_system_prompt_reports_missing_mcp_connections(tmp_path: Path):
+    (tmp_path / "openagent.mcp.json").write_text(
+        json.dumps({"mcpServers": {"broken": {"type": "stdio", "command": "missing-mcp-server", "enabled": True}}}),
+        encoding="utf-8",
+    )
+    runtime = build_runtime(tmp_path)
+
+    prompt = runtime.system_prompt
+
+    assert "MCP runtime:" in prompt
+    assert "connected_servers: none" in prompt
+    assert "configured_server_status: broken=failed" in prompt
 
 
 def test_processor_creates_step_and_tool_parts(tmp_path: Path):

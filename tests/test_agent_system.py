@@ -131,3 +131,14 @@ def test_runtime_auto_delegates_explore_requests(tmp_path: Path):
         message.agent == "explore" or any(part.type == "subtask" for part in message.parts)
         for message in runtime.session.messages
     )
+
+
+def test_runtime_keeps_github_mcp_search_with_primary_agent(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+
+    runtime.run_turn("请使用 GitHub MCP 搜索 query=openagent，并只回复第一项仓库的 full_name。")
+
+    assert not any(
+        message.agent == "session-op" and "[Agent Handoff]" in (message.content or "")
+        for message in runtime.session.messages
+    )
