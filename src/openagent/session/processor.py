@@ -71,6 +71,15 @@ class SessionProcessor:
             )
             history.append(assistant_message)
             if not response.requests_tools:
+                if response.finish in {"length", "other"}:
+                    return self._return_loop_failure(
+                        history=history,
+                        reason="incomplete_model_response",
+                        details={"finish": response.finish or "unknown"},
+                        last_tool_result=last_tool_result,
+                        step_count=step_count,
+                        tool_call_count=tool_call_count,
+                    )
                 return ProcessorResult(
                     history=history,
                     finish_reason=response.finish or "stop",
@@ -457,6 +466,9 @@ class SessionProcessor:
                 break
         if final_response is None:
             raise RuntimeError("stream finished without a final response")
+        if final_response.text and len(final_response.text) > len(text_buffer):
+            self._replace_streamed_text(builder, final_response.text)
+            text_buffer = final_response.text
         builder.update_requested_tools(len(tool_calls))
         finish = final_response.finish or ("tool-calls" if tool_calls else "stop")
         builder.finish_step(
@@ -481,6 +493,17 @@ class SessionProcessor:
             error=final_response.error,
             tool_calls=tool_calls,
         )
+
+    @staticmethod
+    def _replace_streamed_text(builder: AssistantMessageBuilder, text: str) -> None:
+        for part in builder.message.parts:
+            if part.type == "text" and isinstance(part.content, str):
+                part.content = text
+                part.state["status"] = "completed"
+                builder.message.content = builder.message._derive_content_from_parts()
+                return
+        builder.add_text(text)
+        builder.end_text()
 
     def _build_tool_message(
         self,

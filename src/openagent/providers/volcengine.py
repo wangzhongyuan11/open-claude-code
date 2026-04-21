@@ -5,7 +5,7 @@ import os
 from typing import Any, Iterable
 from urllib import error, request
 
-from openagent.domain.messages import AgentResponse, Message, ModelRef, TokenUsage, ToolCall
+from openagent.domain.messages import AgentResponse, Message, MessageError, ModelRef, TokenUsage, ToolCall
 from openagent.domain.tools import ToolSpec
 from openagent.providers.base import BaseProvider
 
@@ -19,6 +19,7 @@ class VolcengineProvider(BaseProvider):
         api_key: str | None = None,
         base_url: str | None = None,
         timeout_seconds: int = 60,
+        max_tokens: int | None = None,
     ) -> None:
         self.model = model
         self.api_key = api_key or os.getenv("ARK_API_KEY") or os.getenv("VOLCENGINE_ARK_API_KEY")
@@ -27,6 +28,7 @@ class VolcengineProvider(BaseProvider):
             or self.DEFAULT_BASE_URL
         ).rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.max_tokens = max_tokens or int(os.getenv("OPENAGENT_MAX_TOKENS", "8192"))
         if not self.api_key:
             raise RuntimeError("Volcengine provider requires ARK_API_KEY or VOLCENGINE_ARK_API_KEY")
         if not self.model:
@@ -42,6 +44,7 @@ class VolcengineProvider(BaseProvider):
             "model": self.model,
             "messages": self._to_chat_messages(messages, system_prompt),
             "tools": [self._to_openai_tool(tool) for tool in tools],
+            "max_tokens": self.max_tokens,
         }
         raw_response = self._post_json("/chat/completions", payload)
         return self._parse_response(raw_response)
@@ -57,6 +60,7 @@ class VolcengineProvider(BaseProvider):
             "messages": self._to_chat_messages(messages, system_prompt),
             "tools": [self._to_openai_tool(tool) for tool in tools],
             "stream": True,
+            "max_tokens": self.max_tokens,
         }
         yield {"type": "start"}
         text_parts: list[str] = []
@@ -100,10 +104,39 @@ class VolcengineProvider(BaseProvider):
         for index in sorted(tool_call_buffers):
             item = tool_call_buffers[index]
             arguments = "".join(item["arguments_parts"]) or "{}"
+            parsed_arguments, parse_error = _parse_tool_arguments(arguments)
+            if parse_error is not None:
+                error_message = f"Malformed tool call arguments for {item['name'] or 'unknown_tool'}: {parse_error}"
+                yield {
+                    "type": "finish",
+                    "response": AgentResponse(
+                        text=("".join(text_parts) or error_message),
+                        tool_calls=[],
+                        finish="other",
+                        model=ModelRef(provider_id="volcengine", model_id=model_name),
+                        tokens=TokenUsage(
+                            input=usage_payload.get("prompt_tokens", 0),
+                            output=usage_payload.get("completion_tokens", 0),
+                            reasoning=usage_payload.get("reasoning_tokens", 0),
+                            cache_read=usage_payload.get("prompt_cache_hit_tokens", 0),
+                            cache_write=usage_payload.get("prompt_cache_miss_tokens", 0),
+                        ),
+                        error=MessageError(
+                            code="malformed_tool_arguments",
+                            message=error_message,
+                            details={
+                                "tool_name": item["name"] or "unknown_tool",
+                                "arguments_preview": arguments[:500],
+                            },
+                        ),
+                        raw={"tool_call_index": index, "arguments": arguments},
+                    ),
+                }
+                return
             tool_call = ToolCall(
                 id=item["id"] or f"tool-call-{index}",
                 name=item["name"] or "unknown_tool",
-                arguments=json.loads(arguments),
+                arguments=parsed_arguments,
             )
             tool_calls.append(tool_call)
             yield {"type": "tool-call", "tool_call": tool_call}
@@ -267,11 +300,31 @@ class VolcengineProvider(BaseProvider):
         for item in message.get("tool_calls", []) or []:
             function = item.get("function", {})
             arguments = function.get("arguments") or "{}"
+            parsed_arguments, parse_error = _parse_tool_arguments(arguments)
+            if parse_error is not None:
+                tool_name = function.get("name") or "unknown_tool"
+                error_message = f"Malformed tool call arguments for {tool_name}: {parse_error}"
+                return AgentResponse(
+                    text=message.get("content") or error_message,
+                    tool_calls=[],
+                    finish="other",
+                    model=ModelRef(provider_id="volcengine", model_id=payload.get("model", "unknown")),
+                    tokens=_usage_from_payload(payload.get("usage", {})),
+                    error=MessageError(
+                        code="malformed_tool_arguments",
+                        message=error_message,
+                        details={
+                            "tool_name": tool_name,
+                            "arguments_preview": arguments[:500],
+                        },
+                    ),
+                    raw=payload,
+                )
             tool_calls.append(
                 ToolCall(
                     id=item["id"],
                     name=function["name"],
-                    arguments=json.loads(arguments),
+                    arguments=parsed_arguments,
                 )
             )
         usage = payload.get("usage", {})
@@ -291,6 +344,26 @@ class VolcengineProvider(BaseProvider):
             ),
             raw=payload,
         )
+
+
+def _parse_tool_arguments(raw: str) -> tuple[dict[str, Any], str | None]:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        return {}, str(exc)
+    if not isinstance(parsed, dict):
+        return {}, f"expected JSON object, got {type(parsed).__name__}"
+    return parsed, None
+
+
+def _usage_from_payload(usage: dict[str, Any]) -> TokenUsage:
+    return TokenUsage(
+        input=usage.get("prompt_tokens", 0),
+        output=usage.get("completion_tokens", 0),
+        reasoning=usage.get("reasoning_tokens", 0),
+        cache_read=usage.get("prompt_cache_hit_tokens", 0),
+        cache_write=usage.get("prompt_cache_miss_tokens", 0),
+    )
 
 
 def _map_openai_finish_reason(value: str | None) -> str:

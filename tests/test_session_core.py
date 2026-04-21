@@ -92,6 +92,21 @@ def test_compaction_creates_summary_and_keeps_recent_messages(tmp_path: Path):
     assert '"compaction_mode":' in status
 
 
+def test_runtime_can_report_and_switch_model(tmp_path: Path):
+    runtime = build_runtime(tmp_path)
+
+    result = runtime.switch_model("test-provider/test-model")
+    payload = json.loads(runtime.model_report())
+    status = json.loads(runtime.status_report())
+
+    assert result == "Switched model to `test-provider/test-model`."
+    assert payload["provider"] == "test-provider"
+    assert payload["model"] == "test-model"
+    assert payload["source"] == "session"
+    assert status["provider"] == "test-provider"
+    assert status["model"] == "test-model"
+
+
 def test_revert_last_turn_removes_latest_user_turn(tmp_path: Path):
     runtime = build_runtime(tmp_path)
     runtime.run_turn("first")
@@ -460,6 +475,40 @@ def test_runtime_stream_handler_receives_text_deltas(tmp_path: Path):
     assert seen == ["stream-", "ok"]
 
 
+def test_streaming_processor_prefers_complete_final_text_when_deltas_are_partial(tmp_path: Path):
+    class PartialDeltaProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            raise AssertionError("stream path should be used")
+
+        def stream_generate(self, messages, tools, system_prompt=None):
+            yield {"type": "start"}
+            yield {"type": "text-delta", "text": "："}
+            yield {
+                "type": "finish",
+                "response": AgentResponse(
+                    text="完整的最终回复",
+                    finish="stop",
+                ),
+            }
+
+    runtime = build_runtime(tmp_path)
+    runtime.provider = PartialDeltaProvider()
+    runtime.provider_factory = PartialDeltaProvider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    reply = runtime.run_turn("stream partial")
+
+    assert reply == "完整的最终回复"
+    assistant_message = next(message for message in runtime.session.messages if message.role == "assistant")
+    text_part = next(part for part in assistant_message.parts if part.type == "text")
+    assert text_part.content == "完整的最终回复"
+
+
 def test_compaction_appends_operational_message_and_prompt_ignores_it(tmp_path: Path):
     runtime = build_runtime(tmp_path, compact_max_messages=2)
     runtime.run_turn("first")
@@ -494,6 +543,10 @@ def test_status_render_includes_transition_metadata(tmp_path: Path):
     assert "state=idle" in status_text
     assert "status_last_transition=completed" in status_text
 
+    status_payload = json.loads(runtime.status_report())
+    assert status_payload["background_task_count"] == 0
+    assert status_payload["active_background_task_count"] == 0
+
 
 def test_runtime_tool_enforcement_retries_and_prevents_unverified_success(tmp_path: Path):
     class FakeCreateProvider(BaseProvider):
@@ -521,6 +574,153 @@ def test_runtime_tool_enforcement_retries_and_prevents_unverified_success(tmp_pa
 
     assert "cannot verify" in reply
     assert provider.calls == 2
+
+
+def test_runtime_tool_enforcement_retries_html_generation_without_tool(tmp_path: Path):
+    class FakeHtmlProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            if self.calls == 1:
+                return AgentResponse(text="我会生成 HTML 页面。", finish="stop")
+            return AgentResponse(text="仍然没有写入文件。", finish="stop")
+
+    runtime = build_runtime(tmp_path)
+    provider = FakeHtmlProvider()
+    runtime.provider = provider
+    runtime.provider_factory = lambda: provider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    reply = runtime.run_turn("请生成 HTML 攻略并保存到 work/guide.html")
+
+    assert "cannot verify" in reply
+    assert provider.calls == 2
+
+
+def test_processor_marks_other_finish_without_tools_as_unstable(tmp_path: Path):
+    class OtherFinishProvider(BaseProvider):
+        def generate(self, messages, tools, system_prompt=None):
+            return AgentResponse(text="我接下来会写文件。", finish="other")
+
+    runtime = build_runtime(tmp_path)
+    provider = OtherFinishProvider()
+    runtime.provider = provider
+    runtime.provider_factory = lambda: provider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    reply = runtime.run_turn("继续")
+
+    assert "incomplete_model_response" in reply
+    assert runtime.session.metadata["last_loop_unstable"] == "true"
+
+
+def test_runtime_continues_after_incomplete_response_following_tool_result(tmp_path: Path):
+    class InterruptedArtifactProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            from openagent.domain.messages import ToolCall
+
+            if self.calls == 1:
+                return AgentResponse(
+                    tool_calls=[ToolCall(id="call-1", name="ensure_dir", arguments={"path": "work"})],
+                    finish="tool-calls",
+                )
+            if self.calls == 2:
+                return AgentResponse(text="：", finish="other")
+            if self.calls == 3:
+                assert any(message.role == "tool" and message.name == "ensure_dir" for message in messages)
+                assert not any(
+                    message.role == "assistant"
+                    and "incomplete_model_response" in message.content
+                    for message in messages
+                )
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="call-2",
+                            name="write_file",
+                            arguments={"path": "work/guide.html", "content": "<!doctype html><title>guide</title>"},
+                        )
+                    ],
+                    finish="tool-calls",
+                )
+            return AgentResponse(text="已生成 work/guide.html", finish="stop")
+
+    runtime = build_runtime(tmp_path)
+    provider = InterruptedArtifactProvider()
+    runtime.provider = provider
+    runtime.provider_factory = lambda: provider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    reply = runtime.run_turn("请生成 HTML 攻略并保存到 work/guide.html")
+
+    assert reply == "已生成 work/guide.html"
+    assert (tmp_path / "work" / "guide.html").read_text(encoding="utf-8").startswith("<!doctype html>")
+    assert provider.calls == 4
+    assert runtime.session.metadata["last_loop_unstable"] == "false"
+    assert runtime.session.metadata["last_loop_tool_calls"] == "2"
+
+
+def test_runtime_continues_after_length_finish_for_artifact_request(tmp_path: Path):
+    class LengthInterruptedProvider(BaseProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def generate(self, messages, tools, system_prompt=None):
+            self.calls += 1
+            from openagent.domain.messages import ToolCall
+
+            if self.calls == 1:
+                return AgentResponse(text="<html", finish="length")
+            if self.calls == 2:
+                return AgentResponse(
+                    tool_calls=[
+                        ToolCall(
+                            id="call-1",
+                            name="write_file",
+                            arguments={"path": "work/guide.html", "content": "<!doctype html><title>guide</title>"},
+                        )
+                    ],
+                    finish="tool-calls",
+                )
+            return AgentResponse(text="已生成 work/guide.html", finish="stop")
+
+    runtime = build_runtime(tmp_path)
+    provider = LengthInterruptedProvider()
+    runtime.provider = provider
+    runtime.provider_factory = lambda: provider
+    runtime.loop = AgentLoop(
+        provider=runtime.provider,
+        tool_registry=runtime.registry,
+        tool_context=runtime.loop.processor.tool_context,
+        event_bus=runtime.event_bus,
+    )
+
+    reply = runtime.run_turn("请生成 HTML 攻略并保存到 work/guide.html")
+
+    assert reply == "已生成 work/guide.html"
+    assert (tmp_path / "work" / "guide.html").exists()
+    assert provider.calls == 3
 
 
 def test_processor_stops_after_write_file_when_request_is_already_satisfied(tmp_path: Path):

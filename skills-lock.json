@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "amap-lbs-skill": {
+      "source": "amap-web/amap-lbs-skill",
+      "sourceType": "github",
+      "computedHash": "abc774f4e855d3396e50908f753d971197da5afb4423872dea2e4e7f507b7b80"
+    }
+  }
+}

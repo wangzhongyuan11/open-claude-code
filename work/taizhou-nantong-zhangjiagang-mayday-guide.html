@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>三天两晚泰州-南通-张家港五一旅行攻略</title>
+  <style>
+    :root {
+      --ink: #20242a;
+      --muted: #667085;
+      --line: #d9e0ea;
+      --paper: #ffffff;
+      --wash: #f5f7fb;
+      --blue: #2257a7;
+      --green: #157a5b;
+      --gold: #9a6b16;
+      --red: #b42318;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+      color: var(--ink);
+      background: var(--wash);
+      line-height: 1.65;
+    }
+    header {
+      min-height: 42vh;
+      color: #fff;
+      display: grid;
+      align-items: end;
+      padding: 56px 7vw 40px;
+      background:
+        linear-gradient(180deg, rgba(18, 28, 44, .28), rgba(18, 28, 44, .86)),
+        url("https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1800&q=80") center/cover;
+    }
+    header h1 {
+      margin: 0 0 12px;
+      font-size: clamp(2rem, 5vw, 4rem);
+      letter-spacing: 0;
+      max-width: 980px;
+    }
+    header p { margin: 0; max-width: 920px; font-size: 1.05rem; }
+    main { max-width: 1160px; margin: 0 auto; padding: 28px 18px 64px; }
+    section {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+      margin: 18px 0;
+    }
+    h2 { margin: 0 0 14px; font-size: 1.45rem; }
+    h3 { margin: 18px 0 8px; font-size: 1.08rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fff;
+    }
+    .tag {
+      display: inline-block;
+      color: #fff;
+      background: var(--blue);
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: .78rem;
+      margin-right: 6px;
+    }
+    .tag.green { background: var(--green); }
+    .tag.gold { background: var(--gold); }
+    .muted { color: var(--muted); }
+    .warn {
+      border-left: 4px solid var(--gold);
+      background: #fff8e6;
+      padding: 12px 14px;
+      border-radius: 6px;
+      margin: 12px 0;
+    }
+    .uncertain { color: var(--red); font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: .95rem; }
+    th, td { border: 1px solid var(--line); padding: 9px; text-align: left; vertical-align: top; }
+    th { background: #eef3fb; }
+    .timeline { border-left: 3px solid var(--blue); padding-left: 16px; }
+    .slot { margin: 0 0 18px; }
+    .slot strong { color: var(--blue); }
+    .btn {
+      display: inline-block;
+      margin-top: 8px;
+      padding: 8px 12px;
+      border-radius: 6px;
+      color: #fff;
+      background: var(--blue);
+      text-decoration: none;
+      font-weight: 700;
+      font-size: .92rem;
+    }
+    .route-list li { margin: 6px 0; }
+    footer { text-align: center; color: var(--muted); font-size: .9rem; margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>三天两晚泰州-南通-张家港五一旅行攻略</h1>
+      <p>按 2026 年 5 月 1 日至 5 月 3 日规划。南通住两晚，Day 1 晚 22:00 从泰州赴南通，Day 3 上午优先尝试南通至张家港汽渡/轮渡方向。</p>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>行程总览</h2>
+      <div class="grid">
+        <div class="card">
+          <span class="tag">Day 1</span><strong>泰州历史水城</strong>
+          <p>溱湖国家湿地公园、乔园、凤城河、泰州老街。22:00 出发前往南通。</p>
+          <p class="muted">高德 MCP 距离测算：凤城河至南通博物苑约 124.5 公里，驾车约 5438 秒，约 1 小时 31 分。</p>
+        </div>
+        <div class="card">
+          <span class="tag green">Day 2</span><strong>南通江海与近代第一城</strong>
+          <p>狼山、南通博物苑、濠河夜游，围绕长江、张謇与近代实业教育展开。</p>
+        </div>
+        <div class="card">
+          <span class="tag gold">Day 3</span><strong>轮渡方向去张家港</strong>
+          <p>上午优先通沙汽渡方向，后游香山、暨阳湖，时间紧则删去沙洲优黄文化类点位。</p>
+          <p class="muted">高德 MCP 距离测算：濠河至香山景区驾车约 67.1 公里，约 4217 秒，约 1 小时 10 分。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>每日时间轴</h2>
+      <div class="timeline">
+        <div class="slot">
+          <strong>Day 1 上午 08:30-12:00 | 溱湖国家湿地公园</strong>
+          <p>交通：泰州市区打车或自驾前往。重点看湿地航道、芦苇荡、候鸟生态和溱湖水乡景观。拍照重点是水面栈道、游船视角和湿地开阔面。</p>
+          <p>餐饮：午餐可安排溱湖八鲜、簖蟹、鱼圆鱼汤类菜。时间紧张时可删去溱湖，把泰州市区历史点做深。</p>
+        </div>
+        <div class="slot">
+          <strong>Day 1 下午 13:30-17:30 | 乔园 - 凤城河 - 泰州老街</strong>
+          <p>交通：市区内打车或步行串联。乔园看明清园林空间，凤城河看城河格局和夜景前景，泰州老街解决晚餐。</p>
+          <p>餐饮：晚餐选泰州早茶店延伸餐、干丝、鱼汤面、蟹黄汤包、黄桥烧饼。时间紧张时保留乔园和凤城河，删老街闲逛。</p>
+        </div>
+        <div class="slot">
+          <strong>Day 1 晚上 22:00-23:35 | 泰州至南通入住</strong>
+          <p>交通：自驾或包车优先，夜间公共交通选择有限。高德 MCP 测得从泰州核心区至南通核心区驾车约 1.5 小时，建议酒店选濠河或南通博物苑周边，便于 Day 2 步行。</p>
+        </div>
+        <div class="slot">
+          <strong>Day 2 上午 08:30-12:00 | 狼山风景名胜区</strong>
+          <p>交通：南通市区打车。重点参观广教禅寺、支云塔、长江视野。狼山高德 POI：南通狼山风景名胜区，坐标 120.887760,31.948766，MCP 返回评级 4.6，开放信息显示 07:00-17:00。</p>
+        </div>
+        <div class="slot">
+          <strong>Day 2 下午 13:30-17:00 | 南通博物苑 - 濠南历史文化街区</strong>
+          <p>南通博物苑坐标 120.869839,32.011296。重点看张謇、近代实业、教育、博物馆制度。MCP 返回室内陈列通常 09:00-17:00，16:30 停止入馆，周一闭馆但法定节假日例外需二次确认。</p>
+        </div>
+        <div class="slot">
+          <strong>Day 2 晚上 18:30-21:00 | 濠河夜游与江海鲜</strong>
+          <p>濠河坐标 120.867057,32.014345。MCP 返回游客中心服务时间 08:30-22:00，游船班次存在周末和节假日安排，五一请以现场为准。可删减项：若排队严重，改为濠河步行环线。</p>
+        </div>
+        <div class="slot">
+          <strong>Day 3 上午 08:00-10:30 | 南通至张家港，优先通沙汽渡方向</strong>
+          <p>建议 07:30 退房，导航“通沙汽渡南通码头”。高德 MCP 对“通沙汽渡南通码头”的地理编码返回为南通市级坐标 120.894522,31.981269，<span class="uncertain">未能确认精确码头 POI 和实时班次</span>，因此必须出行前电话或现场确认。</p>
+        </div>
+        <div class="slot">
+          <strong>Day 3 中午至下午 | 香山景区 - 暨阳湖国家生态公园</strong>
+          <p>香山景区坐标 120.397540,31.925269，MCP 返回开放时间 08:00-17:00，AAAA。暨阳湖国家生态公园坐标 120.534490,31.846314，MCP 返回 24 小时开放信息但节假日以官方通知为准。</p>
+          <p>餐饮：午餐可在张家港城区或金港方向吃长江鲜、鹿苑鸡、本地面点。时间紧张时保留香山，删暨阳湖或文化园。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>城市历史与经济发展</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>泰州</h3>
+          <p>泰州古称海陵，历史上因水网、盐运、漕运和州治地位形成城市格局。文化标签包括梅兰芳、施耐庵相关文化记忆、淮扬菜早茶传统和水城慢生活。代表景观是凤城河、乔园、溱湖湿地、泰州老街。</p>
+          <p>近现代经济以医药、船舶、机电、食品加工等产业突出，中国医药城是理解泰州产业升级的关键词。旅行者可关注“历史城河 + 园林 + 早茶 + 湿地”的组合。</p>
+        </div>
+        <div class="card">
+          <h3>南通</h3>
+          <p>南通古称通州，张謇在近代推动实业、教育、博物馆、城市公共事业建设，因此常被称为“中国近代第一城”。代表景观包括南通博物苑、濠河、狼山、唐闸古镇。</p>
+          <p>经济上，南通依托长江入海口和沿海开放，形成纺织、建筑、船舶海工、装备制造、新材料等产业。城市气质是江海交汇、近代实业遗产和宜居水城并存。</p>
+        </div>
+        <div class="card">
+          <h3>张家港</h3>
+          <p>张家港是苏州下辖县级市，位于长江南岸，沙洲文化、港口贸易和乡镇工业共同塑造城市发展。代表景观包括香山、暨阳湖、双山岛、沙洲优黄相关文化点。</p>
+          <p>经济上以港口物流、冶金、化工新材料、装备制造和民营经济见长，是苏南县域经济强市。旅行者可关注长江岸线、县域工业城市活力和生态公园体系。</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>美食清单</h2>
+      <table>
+        <thead>
+          <tr><th>城市</th><th>至少 5 类美食</th><th>适合餐次与区域</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>泰州</td>
+            <td>泰州早茶、烫干丝、鱼汤面、靖江蟹黄汤包、黄桥烧饼、溱湖八鲜</td>
+            <td>早餐吃早茶和干丝；午餐安排溱湖八鲜；晚餐在泰州老街或凤城河周边找本地菜。具体店铺因排队和营业变化标注为待现场确认。</td>
+          </tr>
+          <tr>
+            <td>南通</td>
+            <td>江海鲜、文蛤、狼山鸡、西亭脆饼、南通跳面、海门山羊肉</td>
+            <td>狼山后吃狼山鸡或本地菜；晚餐安排江海鲜和文蛤；西亭脆饼适合买作伴手礼。濠河、南大街、圆融周边餐饮密集，具体店铺待现场确认。</td>
+          </tr>
+          <tr>
+            <td>张家港</td>
+            <td>长江鲜、河豚相关菜品、鹿苑鸡、拖炉饼、沙洲优黄、本地奥灶面/面点</td>
+            <td>午餐吃长江鲜或鹿苑鸡；下午可买沙洲优黄；河豚必须选择正规持证餐厅，且五一供应和价格待现场确认。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>景点卡片与高德导航</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>溱湖国家湿地公园</h3>
+          <p>泰州生态湿地，适合上午游船和开阔水景拍摄。</p>
+          <p class="muted">MCP maps_geo：120.084874,32.612967</p>
+          <a class="btn" href="https://uri.amap.com/marker?position=120.084874,32.612967&name=溱湖国家湿地公园" target="_blank">在高德地图打开</a>
+        </div>
+        <div class="card">
+          <h3>乔园</h3>
+          <p>明清园林，小尺度空间、亭台水石适合慢看。</p>
+          <p class="muted">MCP maps_geo：119.917951,32.486210</p>
+          <a class="btn" href="https://uri.amap.com/marker?position=119.917951,32.486210&name=乔园" target="_blank">在高德地图打开</a>
+        </div>
+        <div class="card">
+          <h3>凤城河风景区</h3>
+          <p>泰州城河格局代表，下午到夜间都适合。</p>
+          <p class="muted">MCP maps_geo：119.930235,32.483480</p>
+          <a class="btn" href="https://uri.amap.com/marker?position=119.930235,32.483480&name=凤城河风景区" target="_blank">在高德地图打开</a>
+        </div>
+        <div class="card">
+          <h3>狼山风景名胜区</h3>
+          <p>南通登高看长江，广教禅寺、支云塔是重点。</p>
+          <p class="muted">MCP search_detail：120.887760,31.948766；AAAA；评分 4.6。</p>
+          <a class="btn" href="https://uri.amap.com/marker?position=120.887760,31.948766&name=南通狼山风景名胜区" target="_blank">在高德地图打开</a>
+        </div>
+        <div class="card">
+          <h3>南通博物苑</h3>
+          <p>理解张謇和南通近代城市建设的核心点。</p>
+          <p class="muted">MCP search_detail：120.869839,32.011296；评分 4.7。</p>
+          <a class="btn" href="https://uri.amap.com/marker?position=120.869839,32.011296&name=南通博物苑" target="_blank">在高德地图打开</a>
+        </div>
+        <div class="card">
+          <h3>濠河风景名胜区</h3>
+          <p>南通水城环线，夜游和步行都可。</p>
+          <p class="muted">MCP search_detail：120.867057,32.014345；AAAAA；评分 4.7。</p>
+          <a class="btn" href="https://uri.amap.com/marker?position=120.867057,32.014345&name=南通濠河风景名胜区" target="_blank">在高德地图打开</a>
+        </div>
+        <div class="card">
+          <h3>香山景区</h3>
+          <p>张家港标志性景区，适合 Day 3 到达后先游。</p>
+          <p class="muted">MCP search_detail：120.397540,31.925269；AAAA；08:00-17:00。</p>
+          <a class="btn" href="https://uri.amap.com/marker?position=120.397540,31.925269&name=香山景区" target="_blank">在高德地图打开</a>
+        </div>
+        <div class="card">
+          <h3>暨阳湖国家生态公园</h3>
+          <p>张家港城市生态公园，适合下午散步和轻松收尾。</p>
+          <p class="muted">MCP search_detail：120.534490,31.846314；AAAA；节假日以官方通知为准。</p>
+          <a class="btn" href="https://uri.amap.com/marker?position=120.534490,31.846314&name=暨阳湖国家生态公园" target="_blank">在高德地图打开</a>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>交通与轮渡方案说明</h2>
+      <h3>优先方案：通沙汽渡方向</h3>
+      <p>南通至张家港最贴近“轮渡/汽渡体验”的方案是通沙汽渡方向。建议 Day 3 上午 08:00 前后从南通市区出发，先用高德搜索“通沙汽渡南通码头”，再按实时导航前往。</p>
+      <div class="warn">
+        <strong>不确定项：</strong>本次 MCP 查询未确认通沙汽渡精确 POI、实时班次、收费和五一临时调整；“通沙汽渡南通码头”地理编码仅返回南通市级坐标 120.894522,31.981269，不能当作最终码头定位。请出行前一天和当天早上二次确认码头、运营时间、排队情况和是否允许步行/车辆过渡。
+      </div>
+      <h3>备选方案</h3>
+      <ul>
+        <li>自驾备选：若轮渡停运或排队过长，走跨江通道和高速前往张家港，MCP 测得濠河至香山景区驾车约 67.1 公里，约 1 小时 10 分。</li>
+        <li>铁路备选：南通西站或南通站根据当天班次转张家港站，张家港站 MCP 坐标 120.674056,31.817334。五一车票需提前购买。</li>
+        <li>时间备选：若上午交通耗时超过 2 小时，张家港只保留香山景区，取消暨阳湖或市区购物。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>地图路线集成</h2>
+      <p>已用高德 MCP 生成可打开的个人地图 URI，包含南通和张家港核心点位：</p>
+      <p><a class="btn" href="amapuri://workInAmap/createWithToken?polymericId=mcp_f8fc98ec9ac34c79bb6b8769358f0155&from=MCP">在高德地图中打开路线</a></p>
+      <p class="muted">如果浏览器无法直接打开 amapuri，请复制下方地点名称到高德地图依次搜索。</p>
+      <table>
+        <thead>
+          <tr><th>顺序</th><th>地点</th><th>坐标/状态</th><th>说明</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>溱湖国家湿地公园</td><td>120.084874,32.612967</td><td>Day 1 上午</td></tr>
+          <tr><td>2</td><td>乔园</td><td>119.917951,32.486210</td><td>Day 1 下午</td></tr>
+          <tr><td>3</td><td>凤城河风景区</td><td>119.930235,32.483480</td><td>Day 1 傍晚</td></tr>
+          <tr><td>4</td><td>泰州老街</td><td>119.931945,32.482217</td><td>Day 1 晚餐，MCP 返回为公交地铁站点级别，需现场确认入口</td></tr>
+          <tr><td>5</td><td>南通住宿区</td><td>建议濠河/博物苑周边</td><td>住两晚，便于 Day 2 步行</td></tr>
+          <tr><td>6</td><td>狼山风景名胜区</td><td>120.887760,31.948766</td><td>Day 2 上午</td></tr>
+          <tr><td>7</td><td>南通博物苑</td><td>120.869839,32.011296</td><td>Day 2 下午</td></tr>
+          <tr><td>8</td><td>濠河风景名胜区</td><td>120.867057,32.014345</td><td>Day 2 晚上</td></tr>
+          <tr><td>9</td><td>通沙汽渡南通码头</td><td class="uncertain">精确 POI 未确认</td><td>Day 3 上午，需二次确认</td></tr>
+          <tr><td>10</td><td>香山景区</td><td>120.397540,31.925269</td><td>Day 3 主景点</td></tr>
+          <tr><td>11</td><td>暨阳湖国家生态公园</td><td>120.534490,31.846314</td><td>Day 3 放松收尾</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>五一风险提醒</h2>
+      <ul class="route-list">
+        <li>景区预约：狼山、南通博物苑、濠河游船、香山等请提前查看预约和假日开放公告。</li>
+        <li>交通拥堵：Day 1 22:00 泰州至南通仍可能遇到高速事故或假期回流，至少预留 30 分钟缓冲。</li>
+        <li>轮渡班次：通沙汽渡/相关汽渡线路受天气、水位、安检、车辆排队和节假日调度影响，必须二次确认。</li>
+        <li>餐厅排队：泰州早茶、南通江海鲜、张家港长江鲜五一排队明显，尽量错峰或提前订位。</li>
+        <li>天气变化：长江沿线风大，雨天会影响湿地、游船、轮渡和登山体验。</li>
+        <li>食品安全：河豚等高风险菜品只选正规持证餐厅，不尝试来源不明的野生水产。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>MCP 调用记录与二次确认清单</h2>
+      <p>本攻略使用过高德 MCP：maps_geo、maps_text_search、maps_search_detail、maps_distance、maps_schema_personal_map。OpenAgent 会话中也调用了 amap-maps 的 maps_geo，并使用 write_file/read_file 验证生成 HTML。</p>
+      <ul>
+        <li>已确认：泰州 3 个核心点坐标；南通狼山、南通博物苑、濠河的 POI 详情；张家港香山、暨阳湖坐标；两段驾车距离。</li>
+        <li class="uncertain">需确认：通沙汽渡南通侧和张家港侧精确码头、班次、收费、五一车辆/行人规则、是否排队严重。</li>
+        <li class="uncertain">需确认：南通博物苑五一是否按法定节假日开放、濠河游船班次、香山/暨阳湖假日临时公告。</li>
+      </ul>
+    </section>
+
+    <footer>
+      文件路径：work/taizhou-nantong-zhangjiagang-mayday-guide.html。生成日期：2026-04-20。
+    </footer>
+  </main>
+</body>
+</html>

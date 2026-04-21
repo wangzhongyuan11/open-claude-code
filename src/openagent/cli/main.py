@@ -7,6 +7,7 @@ import os
 import shlex
 import sys
 import termios
+from dataclasses import dataclass
 from pathlib import Path
 import tty
 from typing import Any
@@ -17,72 +18,83 @@ from openagent.session.todo import render_todos
 
 try:
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import Completer, Completion
     from prompt_toolkit.history import FileHistory
     from prompt_toolkit.key_binding import KeyBindings
 except ImportError:  # pragma: no cover - exercised by fallback path
     PromptSession = None
+    Completer = None
+    Completion = None
     FileHistory = None
     KeyBindings = None
 
-SHELL_COMMANDS = {
-    "/help",
-    "/session",
-    "/agents",
-    "/history",
-    "/status",
-    "/summary",
-    "/inspect",
-    "/replay",
-    "/skills",
-    "/mcp",
-    "/snapshots",
-    "/yolo",
-    "/compact",
-    "/revert",
-    "/retry",
-    "/todos",
-}
 
-HELP_TEXT = """Available interactive commands:
-/help                     Show this help text
-/session                  Print the current session id
-/agents                   List visible agents and show the active one
-/history                  Print persisted message history
-/status                   Print structured session/runtime status
-/summary                  Print a PR-style conversation summary
-/inspect                  Print a structured JSON inspect view
-/replay                   Print a turn-by-turn replay view
-/skills                   List discovered and permission-visible skills
-/skill <name>             Load one skill through the unified skill tool
-/mcp                      List configured MCP servers and status
-/mcp tools                List MCP tools exposed through the tool registry
-/mcp resources            List MCP resources by server
-/mcp prompts              List MCP prompts by server
-/mcp inspect <server>     Show one MCP server's config, auth state, and discovery details
-/mcp reconnect <server>   Reconnect an MCP server and refresh tool injection
-/mcp ping <server>        Probe one MCP server and print connection status
-/mcp auth <server> [json] Store auth for one MCP server and reconnect it
-/mcp trace                Print MCP transport attempts and recent errors
-/mcp call <server> <tool> [json]  Call an MCP tool manually
-/mcp resource <server> <uri>      Read an MCP resource manually
-/mcp prompt <server> <name> [json] Get an MCP prompt manually
-/snapshots                List persisted file snapshots for the current session
-/yolo                     Print YOLO mode status
-/yolo on                  Enable YOLO mode (auto-approve ask permissions, deny still applies)
-/yolo off                 Disable YOLO mode
-/compact                  Force a compaction pass if needed
-/revert                   Remove the last user turn and its assistant/tool results
-/rollback ...             Revert files from tracked snapshots (last/snapshot/tool/task/file)
-/retry                    Re-run the last user turn
-/todos                    List current persisted todos
-/todo add <text>          Add a todo item (priority defaults to medium)
-/todo done <index>        Mark a todo as completed (1-based index)
-/todo clear               Remove all todo items
-/agent <name>             Switch the active primary agent
-/agent show <name>        Show a stored agent definition
-/agent create <desc>      Generate and persist a custom agent
-/cancel                   Discard the current input buffer
-/exit                     Exit the REPL"""
+@dataclass(frozen=True, slots=True)
+class CommandSpec:
+    command: str
+    usage: str
+    description: str
+    category: str
+
+    @property
+    def accepts_args(self) -> bool:
+        return " " in self.usage or "<" in self.usage or "[" in self.usage or "..." in self.usage
+
+
+COMMAND_SPECS = [
+    CommandSpec("/help", "/help [command]", "Show command help.", "General"),
+    CommandSpec("/session", "/session", "Print the current session id.", "Session"),
+    CommandSpec("/history", "/history", "Print persisted message history.", "Session"),
+    CommandSpec("/status", "/status", "Print structured session/runtime status.", "Session"),
+    CommandSpec("/summary", "/summary", "Print a PR-style conversation summary.", "Session"),
+    CommandSpec("/inspect", "/inspect", "Print a structured JSON inspect view.", "Session"),
+    CommandSpec("/replay", "/replay", "Print a turn-by-turn replay view.", "Session"),
+    CommandSpec("/compact", "/compact", "Force a compaction pass if needed.", "Session"),
+    CommandSpec("/revert", "/revert", "Remove the last user turn and its assistant/tool results.", "Session"),
+    CommandSpec("/retry", "/retry", "Re-run the last user turn.", "Session"),
+    CommandSpec("/agents", "/agents", "List visible agents and show the active one.", "Agent / Model"),
+    CommandSpec("/agent", "/agent <name>", "Switch the active primary agent.", "Agent / Model"),
+    CommandSpec("/agent", "/agent show <name>", "Show a stored agent definition.", "Agent / Model"),
+    CommandSpec("/agent", "/agent create <description>", "Generate and persist a custom agent.", "Agent / Model"),
+    CommandSpec("/model", "/model", "Show the active provider and model.", "Agent / Model"),
+    CommandSpec("/model", "/model <model>", "Switch the active model for this runtime.", "Agent / Model"),
+    CommandSpec("/model", "/model <provider>/<model>", "Switch provider and model together.", "Agent / Model"),
+    CommandSpec("/model", "/model set <model>", "Switch the active model for this runtime.", "Agent / Model"),
+    CommandSpec("/skills", "/skills", "List discovered and permission-visible skills.", "Skills"),
+    CommandSpec("/skill", "/skill <name>", "Load one skill through the unified skill tool.", "Skills"),
+    CommandSpec("/mcp", "/mcp", "List configured MCP servers and status.", "MCP"),
+    CommandSpec("/mcp", "/mcp tools", "List MCP tools exposed through the tool registry.", "MCP"),
+    CommandSpec("/mcp", "/mcp resources", "List MCP resources by server.", "MCP"),
+    CommandSpec("/mcp", "/mcp prompts", "List MCP prompts by server.", "MCP"),
+    CommandSpec("/mcp", "/mcp inspect <server>", "Show one MCP server's config, auth state, and discovery details.", "MCP"),
+    CommandSpec("/mcp", "/mcp reconnect <server>", "Reconnect an MCP server and refresh tool injection.", "MCP"),
+    CommandSpec("/mcp", "/mcp ping <server>", "Probe one MCP server and print connection status.", "MCP"),
+    CommandSpec("/mcp", "/mcp auth <server> [json]", "Store auth for one MCP server and reconnect it.", "MCP"),
+    CommandSpec("/mcp", "/mcp trace", "Print MCP transport attempts and recent errors.", "MCP"),
+    CommandSpec("/mcp", "/mcp call <server> <tool> [json]", "Call an MCP tool manually.", "MCP"),
+    CommandSpec("/mcp", "/mcp resource <server> <uri>", "Read an MCP resource manually.", "MCP"),
+    CommandSpec("/mcp", "/mcp prompt <server> <name> [json]", "Get an MCP prompt manually.", "MCP"),
+    CommandSpec("/snapshots", "/snapshots", "List persisted file snapshots for the current session.", "Safety"),
+    CommandSpec("/rollback", "/rollback last [file]", "Revert files from the latest tracked snapshot.", "Safety"),
+    CommandSpec("/rollback", "/rollback snapshot <id> [file]", "Revert files from a snapshot.", "Safety"),
+    CommandSpec("/rollback", "/rollback tool <tool_call_id> [file]", "Revert files from a tool snapshot.", "Safety"),
+    CommandSpec("/rollback", "/rollback task <task_id> [file]", "Revert files from a background task snapshot.", "Safety"),
+    CommandSpec("/rollback", "/rollback file <path>", "Revert one file from the latest matching snapshot.", "Safety"),
+    CommandSpec("/yolo", "/yolo", "Print YOLO mode status.", "Safety"),
+    CommandSpec("/yolo", "/yolo on", "Enable YOLO mode for ask permissions.", "Safety"),
+    CommandSpec("/yolo", "/yolo off", "Disable YOLO mode.", "Safety"),
+    CommandSpec("/todos", "/todos", "List current persisted todos.", "Todo"),
+    CommandSpec("/todo", "/todo add <text>", "Add a todo item.", "Todo"),
+    CommandSpec("/todo", "/todo done <index>", "Mark a todo as completed.", "Todo"),
+    CommandSpec("/todo", "/todo clear", "Remove all todo items.", "Todo"),
+    CommandSpec("/cancel", "/cancel", "Discard the current input buffer.", "General"),
+    CommandSpec("/exit", "/exit", "Exit the REPL.", "General"),
+]
+
+COMMANDS_BY_NAME = {spec.command: spec for spec in reversed(COMMAND_SPECS)}
+COMMAND_NAMES = sorted(COMMANDS_BY_NAME)
+SHELL_COMMANDS = {spec.command for spec in COMMAND_SPECS if not spec.accepts_args}
+COMMAND_PREFIXES = tuple(sorted({f"{spec.command} " for spec in COMMAND_SPECS if spec.accepts_args}))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -121,6 +133,79 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _print_session_summary(runtime) -> None:
     print(f"session: {runtime.session_id}")
+
+
+def _format_command_help(command: str | None = None) -> str:
+    if command:
+        normalized = command if command.startswith("/") else f"/{command}"
+        matches = [spec for spec in COMMAND_SPECS if spec.command == normalized]
+        if not matches:
+            return f"Unknown command `{command}`. Try /help."
+        width = max(len(spec.usage) for spec in matches)
+        lines = [f"{normalized}"]
+        lines.extend(f"  {spec.usage.ljust(width)}  {spec.description}" for spec in matches)
+        return "\n".join(lines)
+
+    categories: dict[str, list[CommandSpec]] = {}
+    for spec in COMMAND_SPECS:
+        categories.setdefault(spec.category, []).append(spec)
+    lines = ["Available interactive commands:"]
+    for category, specs in categories.items():
+        lines.append("")
+        lines.append(f"{category}:")
+        width = max(len(spec.usage) for spec in specs)
+        seen: set[tuple[str, str]] = set()
+        for spec in specs:
+            key = (spec.usage, spec.description)
+            if key in seen:
+                continue
+            seen.add(key)
+            lines.append(f"  {spec.usage.ljust(width)}  {spec.description}")
+    lines.append("")
+    lines.append("Use /help <command> for command-specific help.")
+    return "\n".join(lines)
+
+
+HELP_TEXT = _format_command_help()
+
+
+def _runtime_model_label(runtime) -> str:
+    info = runtime.model_info()
+    provider = info.get("provider") or "unknown"
+    model = info.get("model") or "unknown"
+    source = info.get("source")
+    if source and source != "settings":
+        return f"{provider}/{model} ({source})"
+    return f"{provider}/{model}"
+
+
+def _render_startup_banner(runtime, workspace: str, stream: bool) -> str:
+    yolo = runtime.session.metadata.get("yolo_mode", "true" if runtime.settings.yolo_mode else "false")
+    lines = [
+        "OpenAgent",
+        f"  session: {runtime.session_id}",
+        f"  cwd:     {Path(workspace).resolve()}",
+        f"  agent:   {runtime.agent_profile.name}",
+        f"  model:   {_runtime_model_label(runtime)}",
+        f"  stream:  {'on' if stream else 'off'}",
+        f"  yolo:    {yolo}",
+        "  tips:    /help  /model  /agents  /status",
+    ]
+    return "\n".join(lines)
+
+
+def _build_bottom_toolbar(runtime, stream: bool):
+    def toolbar() -> str:
+        cwd = runtime.workspace.name or str(runtime.workspace)
+        model = _runtime_model_label(runtime)
+        yolo = runtime.session.metadata.get("yolo_mode", "true" if runtime.settings.yolo_mode else "false")
+        return (
+            f"cwd {cwd} | model {model} | agent {runtime.agent_profile.name} | "
+            f"session {runtime.session_id[:8]} | stream {'on' if stream else 'off'} | "
+            f"yolo {yolo} | Enter send | Ctrl+J newline | /help"
+        )
+
+    return toolbar
 
 
 def _build_stream_handler():
@@ -222,19 +307,81 @@ def _classify_repl_text(text: str) -> tuple[str, str] | None:
         return ("command", "/exit")
     if "\n" not in text and (
         stripped in SHELL_COMMANDS
-        or stripped.startswith("/todo ")
-        or stripped.startswith("/agent ")
-        or stripped.startswith("/skill ")
-        or stripped.startswith("/mcp ")
-        or stripped.startswith("/yolo ")
-        or stripped.startswith("/rollback ")
+        or stripped in COMMANDS_BY_NAME
+        or stripped.startswith(COMMAND_PREFIXES)
     ):
         return ("command", stripped)
     return ("message", text)
 
 
-def _build_repl_session(workspace: str) -> PromptSession | None:
-    if PromptSession is None or FileHistory is None or KeyBindings is None:
+class _SlashCommandCompleter(Completer if Completer is not None else object):
+    def __init__(self, runtime) -> None:
+        self.runtime = runtime
+
+    def get_completions(self, document, complete_event):  # pragma: no cover - prompt_toolkit integration
+        text = document.text_before_cursor
+        stripped = text.lstrip()
+        if not stripped.startswith("/") or "\n" in text:
+            return
+        word = document.get_word_before_cursor(WORD=True)
+        start_position = -len(word) if word else 0
+        if stripped.startswith("/mcp "):
+            yield from self._complete_words(
+                ["tools", "resources", "prompts", "inspect", "reconnect", "ping", "auth", "trace", "call", "resource", "prompt"],
+                word,
+                start_position,
+            )
+            return
+        if stripped.startswith("/agent "):
+            yield from self._complete_agent(word, start_position)
+            return
+        if stripped.startswith("/skill "):
+            yield from self._complete_skill(word, start_position)
+            return
+        if stripped.startswith("/model "):
+            for candidate in self._model_candidates():
+                if candidate.startswith(word):
+                    yield Completion(candidate, start_position=start_position, display_meta="model")
+            return
+        fragment = stripped
+        start_position = -len(fragment)
+        for name in COMMAND_NAMES:
+            if name.startswith(fragment):
+                spec = COMMANDS_BY_NAME[name]
+                yield Completion(name, start_position=start_position, display_meta=spec.description)
+
+    def _complete_words(self, words: list[str], word: str, start_position: int):
+        for candidate in words:
+            if candidate.startswith(word):
+                yield Completion(candidate, start_position=start_position, display_meta="subcommand")
+
+    def _complete_agent(self, word: str, start_position: int):
+        for profile in self.runtime.agent_registry.list(include_hidden=False):
+            if profile.name.startswith(word):
+                yield Completion(profile.name, start_position=start_position, display_meta=profile.description)
+
+    def _complete_skill(self, word: str, start_position: int):
+        try:
+            result = self.runtime.skill_manager.discover()
+        except Exception:
+            return
+        for skill in result.skills:
+            if skill.name.startswith(word):
+                yield Completion(skill.name, start_position=start_position, display_meta=skill.description)
+
+    def _model_candidates(self) -> list[str]:
+        info = self.runtime.model_info()
+        current = str(info.get("model") or "")
+        provider = str(info.get("provider") or "")
+        candidates = [current]
+        if provider and current:
+            candidates.append(f"{provider}/{current}")
+        candidates.extend(item.strip() for item in os.getenv("OPENAGENT_MODELS", "").split(",") if item.strip())
+        return sorted({item for item in candidates if item})
+
+
+def _build_repl_session(workspace: str, runtime, stream: bool) -> PromptSession | None:
+    if PromptSession is None or FileHistory is None or KeyBindings is None or Completion is None:
         return None
     history_dir = Path(workspace) / ".openagent"
     history_dir.mkdir(parents=True, exist_ok=True)
@@ -252,9 +399,9 @@ def _build_repl_session(workspace: str) -> PromptSession | None:
         multiline=True,
         key_bindings=bindings,
         prompt_continuation=lambda width, line_number, is_soft_wrap: "... ",
-        bottom_toolbar=(
-            "Enter 发送 | Ctrl+J 换行 | 右键粘贴可用 | /cancel 取消 | /help 帮助"
-        ),
+        bottom_toolbar=_build_bottom_toolbar(runtime, stream),
+        completer=_SlashCommandCompleter(runtime),
+        complete_while_typing=True,
         history=FileHistory(str(history_dir / "repl_history")),
         mouse_support=False,
     )
@@ -404,12 +551,8 @@ def _read_repl_input(session: PromptSession | None = None) -> tuple[str, str] | 
                 return ("command", "/exit")
             if (
                 stripped in SHELL_COMMANDS
-                or stripped.startswith("/todo ")
-                or stripped.startswith("/agent ")
-                or stripped.startswith("/skill ")
-                or stripped.startswith("/mcp ")
-                or stripped.startswith("/yolo ")
-                or stripped.startswith("/rollback ")
+                or stripped in COMMANDS_BY_NAME
+                or stripped.startswith(COMMAND_PREFIXES)
             ):
                 return ("command", stripped)
         if stripped == "/cancel":
@@ -543,8 +686,8 @@ def main() -> None:
         _run_once(runtime, args.prompt, stream=args.stream)
         return
 
-    _print_session_summary(runtime)
-    repl_session = _build_repl_session(args.workspace)
+    print(_render_startup_banner(runtime, args.workspace, args.stream))
+    repl_session = _build_repl_session(args.workspace, runtime, args.stream)
     if repl_session is None:
         if sys.stdin.isatty():
             print("当前环境未安装 prompt_toolkit，使用内置多行编辑器：Enter 发送，Ctrl+J 换行，支持方向键编辑。")
@@ -560,14 +703,28 @@ def main() -> None:
         item_type, user_input = item
         if user_input in {"/exit", "exit", "quit"}:
             break
-        if item_type == "command" and user_input == "/help":
-            print(HELP_TEXT)
+        if item_type == "command" and (user_input == "/help" or user_input.startswith("/help ")):
+            parts = shlex.split(user_input)
+            print(_format_command_help(parts[1] if len(parts) > 1 else None))
             continue
         if item_type == "command" and user_input == "/session":
             print(runtime.session_id)
             continue
         if item_type == "command" and user_input == "/agents":
             print(runtime.list_agents())
+            continue
+        if item_type == "command" and (user_input == "/model" or user_input.startswith("/model ")):
+            parts = shlex.split(user_input)
+            if len(parts) == 1:
+                print(runtime.model_report())
+                continue
+            if len(parts) == 2:
+                print(runtime.switch_model(parts[1]))
+                continue
+            if len(parts) == 3 and parts[1] == "set":
+                print(runtime.switch_model(parts[2]))
+                continue
+            print("Usage: /model | /model <model> | /model <provider>/<model> | /model set <model>")
             continue
         if item_type == "command" and user_input == "/history":
             for message in runtime.session.messages:

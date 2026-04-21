@@ -471,6 +471,8 @@ def test_parse_multistep_skips_exact_final_content_for_mutable_py_setup():
 def test_request_requires_tool_ignores_planning_only_text():
     assert AgentRuntime._request_requires_tool("先分析最合理的修复方案，不要修改代码。只说明应改哪一行以及为什么。") is False
     assert AgentRuntime._request_requires_tool("请读取 README.md 并只说明前两行。") is True
+    assert AgentRuntime._request_requires_tool("请生成 HTML 攻略并保存到 work/guide.html") is True
+    assert AgentRuntime._request_requires_tool("继续完成上一个任务") is True
 
 
 def test_runtime_multistep_recovery_returns_final_content(tmp_path: Path):

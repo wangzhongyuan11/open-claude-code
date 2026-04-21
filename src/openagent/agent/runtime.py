@@ -57,6 +57,8 @@ DEFAULT_SYSTEM_PROMPT = PROMPT_BUILD
 TOOL_ENFORCEMENT_SUFFIX = """
 Tool enforcement:
 - This user request requires at least one real tool call before you can answer.
+- Your next assistant response must include a tool call, not only prose.
+- For file creation, use write_file with the target path and full content. For verification, use read_file, list_files, or an equivalent filesystem tool.
 - If you do not obtain a tool result, you must not claim the task was completed.
 - If a tool is unavailable or insufficient, say that explicitly instead of pretending the action succeeded.
 """
@@ -66,6 +68,13 @@ This is a multi-step request and you stopped too early.
 Continue executing the unfinished requirements in order.
 Do not repeat steps that are already complete.
 Only stop when every remaining requirement is finished and the final summary has been given.
+"""
+
+INCOMPLETE_RESPONSE_CONTINUATION_SUFFIX = """
+The previous assistant step ended with an incomplete model response before the task was done.
+Continue from the existing tool results.
+If the user requested a file, page, report, or other artifact, create or update it with the appropriate tool now.
+Do not merely describe what you will do; execute the next required tool call.
 """
 
 logger = get_logger(__name__)
@@ -177,6 +186,13 @@ class AgentRuntime:
                 estimated_tokens=prompt_context.estimated_tokens,
                 stream_handler=stream_handler,
             )
+            result = self._continue_incomplete_if_needed(
+                user_text=user_text,
+                system_prompt=prompt_context.system_prompt,
+                estimated_tokens=prompt_context.estimated_tokens,
+                result=result,
+                stream_handler=stream_handler,
+            )
             result = self._continue_multistep_if_needed(
                 user_text=user_text,
                 prompt_messages=prompt_context.messages,
@@ -187,9 +203,16 @@ class AgentRuntime:
             )
             if self._request_requires_tool(user_text) and result.tool_call_count == 0:
                 self._emit("runtime.tool_enforcement.retry", {"session_id": self.session.id})
+                retry_messages = self._trim_incomplete_failure_tail(result.history)
                 result = self.loop.run_result(
-                    messages=prompt_context.messages,
-                    system_prompt=prompt_context.system_prompt + "\n" + TOOL_ENFORCEMENT_SUFFIX,
+                    messages=retry_messages,
+                    system_prompt=(
+                        prompt_context.system_prompt
+                        + "\n"
+                        + INCOMPLETE_RESPONSE_CONTINUATION_SUFFIX
+                        + "\n"
+                        + TOOL_ENFORCEMENT_SUFFIX
+                    ),
                     estimated_tokens=prompt_context.estimated_tokens,
                     stream_handler=stream_handler,
                 )
@@ -231,10 +254,18 @@ class AgentRuntime:
 
     def status_report(self) -> str:
         self._refresh_session()
+        model_info = self.model_info()
+        background_tasks = self.background_tasks.list_tasks(self.session.id)
+        active_background_tasks = [
+            task for task in background_tasks if task.status in {"pending", "running"}
+        ]
         payload = {
             "session_id": self.session.id,
             "title": self.session.title,
             "active_agent": self.agent_profile.name,
+            "provider": model_info["provider"],
+            "model": model_info["model"],
+            "model_source": model_info["source"],
             "yolo_mode": self.session.metadata.get("yolo_mode", "true" if self.settings.yolo_mode else "false"),
             "snapshot_enabled": self.session.metadata.get("snapshot_enabled", "true" if self.settings.snapshot_enabled else "false"),
             **status_payload(self.session),
@@ -250,6 +281,19 @@ class AgentRuntime:
             "last_loop_unstable": self.session.metadata.get("last_loop_unstable"),
             "last_loop_steps": self.session.metadata.get("last_loop_steps"),
             "last_loop_tool_calls": self.session.metadata.get("last_loop_tool_calls"),
+            "background_task_count": len(background_tasks),
+            "active_background_task_count": len(active_background_tasks),
+            "active_background_tasks": [
+                {
+                    "id": task.id,
+                    "title": task.title,
+                    "status": task.status,
+                    "created_at": task.created_at,
+                    "started_at": task.started_at,
+                    "timeout_seconds": task.timeout_seconds,
+                }
+                for task in active_background_tasks
+            ],
         }
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -274,6 +318,64 @@ class AgentRuntime:
             for profile in self.agent_registry.list(include_hidden=include_hidden)
         ]
         return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def model_info(self) -> dict[str, str]:
+        if self.session.metadata.get("active_model"):
+            return {
+                "provider": self.session.metadata.get("active_provider", self.settings.provider_name),
+                "model": self.session.metadata["active_model"],
+                "source": "session",
+            }
+        profile_model = self.agent_profile.model
+        if profile_model is not None:
+            return {
+                "provider": profile_model.provider_id,
+                "model": profile_model.model_id,
+                "source": f"agent:{self.agent_profile.name}",
+            }
+        return {
+            "provider": self.settings.provider_name,
+            "model": self.settings.model,
+            "source": "settings",
+        }
+
+    def model_report(self) -> str:
+        return json.dumps(self.model_info(), ensure_ascii=False, indent=2)
+
+    def switch_model(self, model: str, provider: str | None = None) -> str:
+        raw_model = model.strip()
+        if not raw_model:
+            return "Usage: /model <model> or /model <provider>/<model>"
+        if provider is None and "/" in raw_model:
+            provider, raw_model = raw_model.split("/", 1)
+        provider_name = (provider or self.settings.provider_name).strip()
+        model_name = raw_model.strip()
+        if not provider_name or not model_name:
+            return "Usage: /model <model> or /model <provider>/<model>"
+        self.settings.provider_name = provider_name
+        self.settings.model = model_name
+        self.session.metadata["active_provider"] = provider_name
+        self.session.metadata["active_model"] = model_name
+        self.session.touch()
+        self.session_manager.store.save(self.session)
+        try:
+            self.provider = self.provider_factory(None)
+        except TypeError:
+            self.provider = self.provider_factory()  # type: ignore[call-arg]
+        self.loop = AgentLoop(
+            provider=self.provider,
+            tool_registry=self.registry,
+            tool_context=ToolContext(
+                workspace=self.workspace,
+                session_id=self.session.id,
+                agent_name=self.agent_profile.name,
+                event_bus=self.event_bus,
+                runtime_state=self._tool_runtime_state(self.agent_profile.name),
+                permission=dict(self.session.permission),
+            ),
+            event_bus=self.event_bus,
+        )
+        return f"Switched model to `{provider_name}/{model_name}`."
 
     def show_agent(self, name: str) -> str:
         profile = self.agent_registry.get(name)
@@ -1075,8 +1177,20 @@ class AgentRuntime:
             "file",
             "directory",
             "workspace",
+            "html",
+            ".html",
+            "save",
+            "generate html",
+            "generate file",
+            "generate page",
             "读取",
             "创建",
+            "生成",
+            "保存",
+            "产出",
+            "输出到",
+            "落地",
+            "写出",
             "写入",
             "修改",
             "编辑",
@@ -1086,6 +1200,12 @@ class AgentRuntime:
             "文件",
             "目录",
             "工作区",
+            "页面",
+            "网页",
+            "攻略",
+            "继续完成",
+            "继续执行",
+            "完成上一个任务",
         ]
         return any(keyword in lowered for keyword in keywords)
 
@@ -1100,6 +1220,61 @@ class AgentRuntime:
         result.history = history
         result.finish_reason = "other"
         return result
+
+    def _continue_incomplete_if_needed(
+        self,
+        user_text: str,
+        system_prompt: str,
+        estimated_tokens: int,
+        result,
+        stream_handler: Callable[[dict[str, Any]], None] | None,
+    ):
+        if result.finish_reason != "incomplete_model_response":
+            return result
+        if not self._request_requires_tool(user_text) and result.tool_call_count == 0:
+            return result
+        current = result
+        for _ in range(3):
+            if current.finish_reason != "incomplete_model_response":
+                return current
+            self._emit(
+                "runtime.incomplete_response.continue",
+                {
+                    "session_id": self.session.id,
+                    "previous_step_count": current.step_count,
+                    "previous_tool_call_count": current.tool_call_count,
+                },
+            )
+            retry_messages = self._trim_incomplete_failure_tail(current.history)
+            continued = self.loop.run_result(
+                messages=retry_messages,
+                system_prompt=system_prompt + "\n" + INCOMPLETE_RESPONSE_CONTINUATION_SUFFIX,
+                estimated_tokens=estimated_tokens,
+                stream_handler=stream_handler,
+            )
+            continued.step_count += current.step_count
+            continued.tool_call_count += current.tool_call_count
+            current = continued
+        return current
+
+    @staticmethod
+    def _trim_incomplete_failure_tail(history: list[Message]) -> list[Message]:
+        trimmed = list(history)
+        if (
+            trimmed
+            and trimmed[-1].role == "assistant"
+            and trimmed[-1].finish == "other"
+            and trimmed[-1].content.startswith("Stopped because the tool loop became unstable (incomplete_model_response)")
+        ):
+            trimmed.pop()
+        if (
+            trimmed
+            and trimmed[-1].role == "assistant"
+            and trimmed[-1].finish == "other"
+            and not trimmed[-1].tool_calls
+        ):
+            trimmed.pop()
+        return trimmed
 
     def _continue_multistep_if_needed(
         self,
@@ -1161,6 +1336,9 @@ def build_default_runtime(
     workspace_path = settings.workspace
     manager = build_session_manager(workspace=workspace_path, session_root=session_root or settings.session_root)
     session = manager.start(workspace=workspace_path, session_id=session_id)
+    if session.metadata.get("active_model"):
+        settings.provider_name = session.metadata.get("active_provider", settings.provider_name)
+        settings.model = session.metadata["active_model"]
     if explicit_yolo or settings.yolo_mode:
         session.permission["yolo"] = settings.yolo_mode
         session.metadata["yolo_mode"] = "true" if settings.yolo_mode else "false"
@@ -1173,7 +1351,8 @@ def build_default_runtime(
     def provider_factory(profile: AgentProfile | str | None = None) -> BaseProvider:
         if isinstance(profile, str):
             profile = agent_registry.get(profile)
-        return build_provider(settings, model_override=profile.model if profile else None)
+        model_override = None if session.metadata.get("active_model") else (profile.model if profile else None)
+        return build_provider(settings, model_override=model_override)
 
     active_profile = agent_registry.get(
         agent_name

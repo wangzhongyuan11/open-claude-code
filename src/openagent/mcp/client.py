@@ -102,6 +102,7 @@ class StdioMcpClient(BaseMcpClient):
         self._process: subprocess.Popen[str] | None = None
         self._stderr: list[str] = []
         self._stderr_thread: threading.Thread | None = None
+        self._stdio_framing = "content-length"
 
     @property
     def running(self) -> bool:
@@ -118,6 +119,20 @@ class StdioMcpClient(BaseMcpClient):
     def connect(self) -> None:
         if self.running:
             return
+        errors: list[str] = []
+        for framing in ("jsonl", "content-length"):
+            self._stdio_framing = framing
+            try:
+                self._connect_with_framing()
+                self.transport_name = "stdio"
+                self.transport_attempts = [{"transport": "stdio", "status": "ok", "framing": framing}]
+                return
+            except Exception as exc:
+                errors.append(f"{framing}: {exc}")
+                self.close()
+        raise McpClientError("; ".join(errors))
+
+    def _connect_with_framing(self) -> None:
         env = os.environ.copy()
         env.update(self.config.env)
         self._process = subprocess.Popen(
@@ -127,15 +142,12 @@ class StdioMcpClient(BaseMcpClient):
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
+            bufsize=0,
         )
         self._stderr_thread = threading.Thread(target=self._read_stderr, daemon=True)
         self._stderr_thread.start()
         try:
             self._initialize()
-            self.transport_name = "stdio"
-            self.transport_attempts = [{"transport": "stdio", "status": "ok"}]
         except Exception:
             self.close()
             raise
@@ -162,7 +174,7 @@ class StdioMcpClient(BaseMcpClient):
         request_id = self._new_request_id()
         payload = {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}
         assert process.stdin is not None
-        process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        self._write_payload(process, payload)
         process.stdin.flush()
         deadline = time.time() + self.config.timeout_seconds
         while time.time() < deadline:
@@ -170,14 +182,9 @@ class StdioMcpClient(BaseMcpClient):
                 raise McpClientError(
                     f"MCP server {self.config.name} exited with code {process.returncode}: {self.stderr_tail}"
                 )
-            assert process.stdout is not None
-            ready, _, _ = select.select([process.stdout], [], [], min(0.25, max(0.0, deadline - time.time())))
-            if not ready:
+            message = self._read_payload(process, deadline)
+            if message is None:
                 continue
-            line = process.stdout.readline()
-            if not line:
-                continue
-            message = json.loads(line)
             if "id" not in message or message.get("id") != request_id:
                 continue
             if message.get("error"):
@@ -191,7 +198,7 @@ class StdioMcpClient(BaseMcpClient):
         process = self._ensure_process()
         assert process.stdin is not None
         payload = {"jsonrpc": "2.0", "method": method, "params": params}
-        process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        self._write_payload(process, payload)
         process.stdin.flush()
 
     def _ensure_process(self) -> subprocess.Popen[str]:
@@ -204,7 +211,65 @@ class StdioMcpClient(BaseMcpClient):
         if process is None or process.stderr is None:
             return
         for line in process.stderr:
-            self._stderr.append(line.rstrip())
+            text = line.decode("utf-8", errors="replace") if isinstance(line, bytes) else line
+            self._stderr.append(text.rstrip())
+
+    def _write_payload(self, process: subprocess.Popen, payload: dict[str, Any]) -> None:
+        assert process.stdin is not None
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        if self._stdio_framing == "content-length":
+            process.stdin.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
+        else:
+            process.stdin.write(body + b"\n")
+
+    def _read_payload(self, process: subprocess.Popen, deadline: float) -> dict[str, Any] | None:
+        assert process.stdout is not None
+        timeout = min(0.25, max(0.0, deadline - time.time()))
+        ready, _, _ = select.select([process.stdout], [], [], timeout)
+        if not ready:
+            return None
+        if self._stdio_framing == "content-length":
+            return self._read_content_length_payload(process, deadline)
+        line = process.stdout.readline()
+        if not line:
+            return None
+        if isinstance(line, bytes):
+            line = line.decode("utf-8")
+        return json.loads(line)
+
+    def _read_content_length_payload(self, process: subprocess.Popen, deadline: float) -> dict[str, Any] | None:
+        assert process.stdout is not None
+        headers: dict[str, str] = {}
+        while time.time() < deadline:
+            line = process.stdout.readline()
+            if not line:
+                return None
+            if isinstance(line, bytes):
+                line_text = line.decode("ascii", errors="replace")
+            else:
+                line_text = line
+            line_text = line_text.rstrip("\r\n")
+            if not line_text:
+                break
+            if ":" in line_text:
+                key, value = line_text.split(":", 1)
+                headers[key.strip().lower()] = value.strip()
+        length_text = headers.get("content-length")
+        if not length_text:
+            raise McpClientError(f"MCP server {self.config.name} sent framed response without Content-Length")
+        remaining = int(length_text)
+        chunks: list[bytes] = []
+        while remaining > 0 and time.time() < deadline:
+            chunk = process.stdout.read(remaining)
+            if not chunk:
+                break
+            if isinstance(chunk, str):
+                chunk = chunk.encode("utf-8")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if remaining > 0:
+            return None
+        return json.loads(b"".join(chunks).decode("utf-8"))
 
 
 class RemoteMcpClient(BaseMcpClient):

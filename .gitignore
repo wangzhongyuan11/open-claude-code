@@ -4,3 +4,5 @@
 __pycache__/
 *.pyc
 *.egg-info/
+node_modules/
+.claude/skills/amap-lbs-skill/config.json

@@ -1,3 +1,16 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "amap-maps": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "/root/.npm/_npx/3f19108e4acac271/node_modules/@amap/amap-maps-mcp-server/build/index.js"
+      ],
+      "env": {
+        "AMAP_MAPS_API_KEY": "$AMAP_MAPS_API_KEY"
+      },
+      "timeout": 60,
+      "enabled": true
+    }
+  }
 }

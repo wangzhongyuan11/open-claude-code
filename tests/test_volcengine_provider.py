@@ -92,6 +92,7 @@ def test_volcengine_provider_posts_expected_payload(monkeypatch):
     assert response.text == "ok"
     assert captured["url"].endswith("/chat/completions")
     assert captured["body"]["model"] == "ep-test"
+    assert captured["body"]["max_tokens"] == 8192
     assert captured["body"]["messages"][0]["role"] == "system"
     assert captured["headers"]["Authorization"] == "Bearer secret"
 
@@ -106,6 +107,7 @@ def test_volcengine_provider_stream_generate_parses_text_and_tool_calls(monkeypa
     def fake_stream(path, payload):
         assert path == "/chat/completions"
         assert payload["stream"] is True
+        assert payload["max_tokens"] == 8192
         yield {
             "model": "ep-test",
             "choices": [
@@ -176,6 +178,79 @@ def test_volcengine_provider_stream_generate_parses_text_and_tool_calls(monkeypa
     assert events[4]["type"] == "finish"
     assert events[4]["response"].text == "先读取"
     assert events[4]["response"].finish == "tool-calls"
+
+
+def test_volcengine_provider_stream_generate_handles_malformed_tool_arguments(monkeypatch):
+    provider = VolcengineProvider(
+        model="ep-test",
+        api_key="secret",
+        base_url="https://ark.cn-beijing.volces.com/api/coding/v3",
+    )
+
+    def fake_stream(path, payload):
+        yield {
+            "model": "ep-test",
+            "choices": [
+                {
+                    "delta": {
+                        "content": "partial",
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call-1",
+                                "function": {"name": "read_file", "arguments": "{\"path\":\"README"},
+                            }
+                        ],
+                    },
+                    "finish_reason": "tool_calls",
+                }
+            ],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 5},
+        }
+
+    monkeypatch.setattr(provider, "_post_stream_json", fake_stream)
+
+    events = list(provider.stream_generate(messages=[Message(role="user", content="hello")], tools=[]))
+
+    assert events[0]["type"] == "start"
+    assert events[1] == {"type": "text-delta", "text": "partial"}
+    assert events[2]["type"] == "finish"
+    response = events[2]["response"]
+    assert response.finish == "other"
+    assert response.tool_calls == []
+    assert response.error.code == "malformed_tool_arguments"
+    assert response.error.details["tool_name"] == "read_file"
+
+
+def test_volcengine_provider_parse_response_handles_malformed_tool_arguments():
+    payload = {
+        "model": "ep-test",
+        "choices": [
+            {
+                "message": {
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "function": {
+                                "name": "write_file",
+                                "arguments": "{\"path\":\"a.txt",
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {"prompt_tokens": 3, "completion_tokens": 2},
+    }
+
+    response = VolcengineProvider._parse_response(payload)
+
+    assert response.finish == "other"
+    assert response.tool_calls == []
+    assert response.error.code == "malformed_tool_arguments"
+    assert response.tokens.input == 3
 
 
 def test_volcengine_provider_stream_generate_parses_reasoning_deltas(monkeypatch):

@@ -1,6 +1,6 @@
 from argparse import Namespace
 
-from openagent.cli.main import _build_stream_handler, _classify_repl_text, _read_repl_input, build_parser
+from openagent.cli.main import _build_stream_handler, _classify_repl_text, _format_command_help, _read_repl_input, build_parser
 
 
 def test_cli_parser_accepts_prompt_and_print_session():
@@ -150,6 +150,23 @@ def test_repl_reader_treats_mcp_commands_as_commands():
         "command",
         "/mcp resource everything demo://resource/static/document/architecture.md",
     )
+
+
+def test_repl_reader_treats_model_commands_as_commands():
+    assert _classify_repl_text("/model") == ("command", "/model")
+    assert _classify_repl_text("/model claude-sonnet-4-5") == ("command", "/model claude-sonnet-4-5")
+    assert _classify_repl_text("/model anthropic/claude-sonnet-4-5") == (
+        "command",
+        "/model anthropic/claude-sonnet-4-5",
+    )
+
+
+def test_command_help_is_generated_from_registry():
+    help_text = _format_command_help()
+    model_help = _format_command_help("/model")
+
+    assert "Agent / Model:" in help_text
+    assert "/model <provider>/<model>" in model_help
 
 
 def test_classify_repl_text_treats_cancel_as_noop(capsys):
